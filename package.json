@@ -1,0 +1,26 @@
+{
+  "name": "beat-roguelite",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "check:ddd": "node scripts/check-ddd.mjs",
+    "import:tka": "dotnet run --project tools/tka-import -- --out public/figures/tka-jodi/models",
+    "import:tka:force": "dotnet run --project tools/tka-import -- --in inbox --out public/figures/tka-jodi/models --force",
+    "import:tka:poses": "node -e \"const fs=require('fs'); const root='public/figures/tka-jodi/models'; for (const d of ['Achates_Poses','Achates_Sprint']) fs.rmSync(root+'/'+d,{recursive:true,force:true})\" && dotnet run --project tools/tka-import -- --in inbox --out public/figures/tka-jodi/models --only Achates --force",
+    "import:tka:game-anims": "dotnet run --project tools/tka-import -- --game-anims",
+    "import:skyrim": "node tools/skyrim-import/run.mjs"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "three": "^0.185.1"
+  }
+}

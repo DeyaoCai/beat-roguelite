@@ -1,0 +1,18 @@
+{
+  "_comment": "This machine: Steam SE + MO2 instance under Local/ModOrganizer. Head/hkx live in BSA until extracted into Data.",
+  "gameData": "E:/SteamLibrary/steamapps/common/Skyrim Special Edition/Data",
+  "mo2Mods": "C:/Users/Admin/AppData/Local/ModOrganizer/Skyrim Special Edition/mods",
+  "body": "CBBE 3BA/meshes/actors/character/character assets/femalebody_1.nif",
+  "head": "",
+  "hands": "CBBE 3BA/meshes/actors/character/character assets/femalehands_1.nif",
+  "feet": "CBBE 3BA/meshes/actors/character/character assets/femalefeet_1.nif",
+  "clothes": [],
+  "skeletonNif": "XP32 Maximum Skeleton Special Extended/meshes/actors/character/character assets female/skeleton_female.nif",
+  "skeletonHkx": "tools/skyrim-import/.cache/skeleton_female.hkx",
+  "gaits": {
+    "idle": "tools/skyrim-import/.cache/mt_idle.hkx",
+    "walk": "tools/skyrim-import/.cache/mt_walkforward.hkx",
+    "cast": "tools/skyrim-import/.cache/mrh_release.hkx"
+  },
+  "out": "public/figures/skyrim-female/models/body.glb"
+}

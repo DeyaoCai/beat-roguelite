@@ -1,0 +1,16 @@
+{
+  "id": "skyrim-female",
+  "caption": "Skyrim 3BA",
+  "body": "models/body.glb",
+  "height": 1.7,
+  "gaits": {
+    "idle": "models/body.glb",
+    "walk": "models/body.glb"
+  },
+  "capabilities": {
+    "wardrobe": false,
+    "poses": false,
+    "jiggle": false
+  },
+  "voices": "voices/voices.json"
+}
