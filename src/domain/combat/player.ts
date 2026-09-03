@@ -22,7 +22,8 @@ import type { World } from './types'
 const DASH_DIST = 2.7
 const DASH_DUR = 0.13
 const DASH_IFRAME = 0.2
-const DASH_CD = 0.42
+/** Player dash cooldown seconds (snapshot / HUD rings). */
+export const DASH_CD = 0.42
 const DASH_HEAT = 16
 
 export function tickPlayerMove(

@@ -15,7 +15,6 @@ body {
   background: #140e0a;
   color: #f3ead8;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  /* Avoid mobile URL-bar / bounce gaps */
   overscroll-behavior: none;
   touch-action: none;
 }
@@ -34,4 +33,593 @@ canvas {
   width: 100%;
   height: 100%;
   cursor: crosshair;
+}
+
+/* —— Touch shell —— */
+.touch-shell {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #f3ead8;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0)
+    env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+}
+
+.touch-shell__menu,
+.touch-shell__offer,
+.touch-shell__pause {
+  display: none;
+  pointer-events: auto;
+  position: absolute;
+  inset: 0;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(10, 6, 4, 0.35) 42%,
+    rgba(10, 6, 4, 0.92) 100%
+  );
+}
+
+.touch-shell__menu--hub {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 38%,
+    rgba(10, 6, 4, 0.45) 58%,
+    rgba(10, 6, 4, 0.94) 100%
+  );
+}
+
+.touch-shell__menu--codex {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 55%,
+    rgba(10, 6, 4, 0.55) 70%,
+    rgba(10, 6, 4, 0.94) 100%
+  );
+}
+
+.touch-shell__menu--sheet {
+  align-items: stretch;
+  background: rgba(10, 6, 4, 0.55);
+}
+
+.touch-shell__menu--center,
+.touch-shell__pause,
+.touch-shell__offer {
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(7, 10, 16, 0.72);
+}
+
+.touch-shell__dock {
+  width: min(480px, 100%);
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.touch-shell__dock--slim {
+  gap: 12px;
+  background: #1c120c;
+  border-radius: 18px 18px 0 0;
+  border: 1px solid rgba(180, 140, 90, 0.28);
+  border-bottom: 0;
+}
+
+.touch-shell__brand-name {
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+
+.touch-shell__brand-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #b8a894;
+}
+
+.touch-shell__dock-top {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.touch-shell__purse-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(232, 160, 74, 0.16);
+  border: 1px solid rgba(232, 160, 74, 0.4);
+  color: #fde68a;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.touch-shell__sheet {
+  width: min(520px, 100%);
+  margin: 0 auto;
+  height: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #1c120c;
+  border-left: 1px solid rgba(180, 140, 90, 0.22);
+  border-right: 1px solid rgba(180, 140, 90, 0.22);
+}
+
+.touch-shell__sheet--compact {
+  height: auto;
+  max-height: min(78vh, 640px);
+  margin: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(180, 140, 90, 0.28);
+}
+
+.touch-shell__header {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top, 0));
+  border-bottom: 1px solid rgba(180, 140, 90, 0.2);
+}
+
+.touch-shell__header-title {
+  font-weight: 700;
+  font-size: 17px;
+  text-align: center;
+}
+
+.touch-shell__header-spacer {
+  width: 44px;
+}
+
+.touch-shell__back-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid rgba(184, 168, 148, 0.35);
+  background: transparent;
+  color: #f3ead8;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.touch-shell__sheet-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.touch-shell__sheet-foot {
+  flex: 0 0 auto;
+  padding: 10px 14px calc(12px + env(safe-area-inset-bottom, 0));
+  border-top: 1px solid rgba(180, 140, 90, 0.22);
+  background: rgba(14, 10, 8, 0.96);
+}
+
+.touch-shell__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.touch-shell__section-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #b8a894;
+  letter-spacing: 0.04em;
+}
+
+.touch-shell__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.touch-shell__figure-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(243, 234, 216, 0.06);
+  border: 1px solid rgba(180, 140, 90, 0.28);
+}
+
+.touch-shell__figure-caption {
+  font-size: 13px;
+  color: #d4c4b0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.touch-shell__card {
+  width: min(440px, 100%);
+  max-height: min(78vh, 720px);
+  overflow: auto;
+  background: #1c120c;
+  border: 1px solid rgba(180, 140, 90, 0.35);
+  border-radius: 14px;
+  padding: 16px 16px 18px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.touch-shell__card--pause,
+.touch-shell__card--result {
+  max-height: none;
+}
+
+.touch-shell__kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #e8a04a;
+}
+
+.touch-shell__card-title {
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.touch-shell__card-title--lg {
+  font-size: 32px;
+  line-height: 1.1;
+}
+
+.touch-shell__banked {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fbbf24;
+}
+
+.touch-shell__meta {
+  font-size: 13px;
+  color: #b8a894;
+}
+
+.touch-shell__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.touch-shell__cell {
+  text-align: left;
+  background: rgba(243, 234, 216, 0.06);
+  border: 1px solid rgba(180, 140, 90, 0.28);
+  border-radius: 12px;
+  padding: 12px;
+  color: #f3ead8;
+  font-weight: 700;
+  font-size: 15px;
+  min-height: 64px;
+}
+
+.touch-shell__cell-blurb {
+  display: block;
+  margin-top: 4px;
+  font-weight: 500;
+  font-size: 12px;
+  color: #b8a894;
+}
+
+.touch-shell__steppers {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.touch-shell__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.touch-shell__value {
+  flex: 1;
+  text-align: center;
+  font-size: 14px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.touch-shell__chip {
+  background: rgba(243, 234, 216, 0.06);
+  border: 1px solid rgba(180, 140, 90, 0.28);
+  color: #f3ead8;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 13px;
+  min-height: 40px;
+}
+
+.touch-shell__chip--on {
+  background: rgba(232, 160, 74, 0.22);
+  border-color: rgba(232, 160, 74, 0.65);
+  color: #fde68a;
+}
+
+.touch-shell__mini {
+  background: rgba(243, 234, 216, 0.08);
+  border: 1px solid rgba(180, 140, 90, 0.3);
+  color: #f3ead8;
+  border-radius: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  font-weight: 700;
+}
+
+.touch-shell__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.touch-shell__list-item {
+  text-align: left;
+  background: rgba(243, 234, 216, 0.06);
+  border: 1px solid rgba(180, 140, 90, 0.28);
+  border-radius: 12px;
+  padding: 12px;
+  color: #f3ead8;
+  font-weight: 700;
+  font-size: 14px;
+  min-height: 52px;
+}
+
+.touch-shell__list-item:disabled {
+  opacity: 0.45;
+}
+
+.touch-shell__shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.touch-shell__shelf-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  width: 100%;
+  background: rgba(243, 234, 216, 0.06);
+  border: 1px solid rgba(180, 140, 90, 0.28);
+  border-radius: 12px;
+  padding: 12px;
+  color: #f3ead8;
+  min-height: 64px;
+}
+
+.touch-shell__shelf-item:disabled {
+  opacity: 0.45;
+}
+
+.touch-shell__shelf-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.touch-shell__shelf-name {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.touch-shell__shelf-price {
+  flex: 0 0 auto;
+  min-width: 52px;
+  text-align: center;
+  font-weight: 800;
+  font-size: 15px;
+  color: #fbbf24;
+  padding: 8px 6px;
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.touch-shell__shelf-price--mute {
+  color: #b8a894;
+  background: rgba(243, 234, 216, 0.06);
+  font-size: 13px;
+}
+
+.touch-shell__cta {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 12px;
+  border: 1px solid rgba(180, 140, 90, 0.35);
+  background: rgba(243, 234, 216, 0.08);
+  color: #f3ead8;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.touch-shell__cta--primary {
+  background: #e8a04a;
+  color: #1a1008;
+  border: 0;
+}
+
+.touch-shell__cta--hero {
+  min-height: 56px;
+  font-size: 18px;
+}
+
+.touch-shell__cta--danger {
+  background: transparent;
+  color: #fda4af;
+  border-color: rgba(251, 113, 133, 0.45);
+}
+
+/* —— Touch pad —— */
+.touch-pad {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  pointer-events: none;
+}
+
+.touch-pad__stick {
+  pointer-events: auto;
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: 128px;
+  height: 128px;
+  touch-action: none;
+}
+
+.touch-pad__stick-base {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: rgba(22, 14, 10, 0.55);
+  border: 2px solid rgba(232, 160, 74, 0.35);
+}
+
+.touch-pad__stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  margin: 0;
+  border-radius: 50%;
+  background: rgba(232, 160, 74, 0.85);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.touch-pad__actions {
+  pointer-events: auto;
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.touch-pad__btn {
+  position: relative;
+  overflow: hidden;
+  min-width: 72px;
+  min-height: 52px;
+  border-radius: 14px;
+  border: 1px solid rgba(180, 140, 90, 0.4);
+  background: rgba(22, 14, 10, 0.72);
+  color: #f3ead8;
+  font-weight: 700;
+  font-size: 14px;
+  touch-action: manipulation;
+}
+
+.touch-pad__btn-label {
+  position: relative;
+  z-index: 1;
+}
+
+.touch-pad__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    conic-gradient(
+      from -90deg,
+      rgba(232, 160, 74, 0.35) calc(var(--fill, 0) * 100%),
+      transparent 0
+    ),
+    conic-gradient(
+      from -90deg,
+      rgba(8, 6, 4, 0.62) calc(var(--cd, 0) * 100%),
+      transparent 0
+    );
+}
+
+.touch-pad__btn--fever {
+  border-color: rgba(250, 204, 21, 0.55);
+  color: #fde047;
+}
+
+.touch-pad__btn--fever.is-ready {
+  box-shadow: 0 0 0 2px rgba(253, 224, 71, 0.45);
+}
+
+.touch-pad__btn--fever.is-active {
+  background: rgba(250, 204, 21, 0.28);
+  color: #fef08a;
+}
+
+.touch-pad__btn--fever.is-locked,
+.touch-pad__btn--fever:disabled {
+  opacity: 0.45;
+  color: #b8a894;
+}
+
+.touch-pad__btn--dash {
+  border-color: rgba(125, 211, 252, 0.5);
+  color: #7dd3fc;
+}
+
+.touch-pad__btn--dash.is-ready {
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.35);
+}
+
+.touch-pad__btn--dash.is-cooling {
+  opacity: 0.75;
+}
+
+.touch-pad__btn--pause {
+  min-height: 40px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .touch-pad__stick {
+    width: 104px;
+    height: 104px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .touch-pad__btn {
+    min-width: 64px;
+    min-height: 44px;
+    font-size: 12px;
+  }
+
+  .touch-pad__actions {
+    gap: 8px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+  }
 }

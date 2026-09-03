@@ -1,6 +1,8 @@
 import { AudioClock } from '../adapters/audio/clock'
 import { createInput } from '../adapters/input/keys'
+import { createTouchPad } from '../adapters/input/touchPad'
 import { createThreeOrthoRenderer } from '../presentation/render/threeOrtho'
+import { createTouchShell } from '../presentation/shell/touchShell'
 import type { PrepFocus, Renderer, SceneKind } from '../presentation/render/types'
 import { createWorld, pushHint, resolveWaveDurationSec } from '../domain/combat'
 import {
@@ -12,16 +14,20 @@ import {
   duoFuseUpgradeId,
   makeOwned,
   rollStartStat,
+  toggleContract,
 } from '../domain/progression'
 import type { OwnedUpgrade } from '../domain/progression'
 import { CHARACTERS, DEFAULT_CHARACTER, type CharacterId } from '../content/characters'
 import { codexAt, wrapCodexIndex, codexPreviewOf } from '../content/codex'
 import { KITS } from '../content/kits'
-import { DEFAULT_WEAPON, type WeaponId } from '../content/weapons'
+import { DEFAULT_WEAPON, STARTERS, type StarterId, type WeaponId } from '../content/weapons'
 import { hubItemsFor } from '../content/hub'
 import { cycleHubTheme, type HubThemeId } from '../content/hubThemes'
 import { loadSettings, saveSettings } from '../content/settingsStore'
-import { addPurse, loadMeta } from '../content/metaStore'
+import { SHOP_GOODS, type BlessingId, type ContractId } from '../content/meta'
+import { addPurse, loadMeta, tryBuy } from '../content/metaStore'
+import { isRhythmEnabled } from '../lib/rhythmEnabled'
+import { resolveUiMode } from '../lib/uiMode'
 import {
   DEFAULT_TRACK_ID,
   defaultTrack,
@@ -31,7 +37,6 @@ import {
   resUrl,
   type TrackDef,
 } from '../content/tracks'
-import { isRhythmEnabled } from '../lib/rhythmEnabled'
 import {
   chartFromRhythmPoints,
   createRhythmRuntime,
@@ -274,6 +279,98 @@ export async function boot(app: HTMLElement, opts: BootOptions = {}): Promise<()
     onSfxGain: (g) => applySfxGain(g),
     getSfxGain: () => clock.getSfxGain(),
   })
+
+  let touchMode = resolveUiMode()
+  const refreshUiMode = () => {
+    touchMode = resolveUiMode()
+  }
+  window.addEventListener('resize', refreshUiMode)
+
+  const touchPad = createTouchPad(app, input.keys)
+  touchPad.setOnPause(() => setPaused(true))
+
+  const cycleBlessingTouch = (dir: 1 | -1) => {
+    const unlocked = loadMeta().blessings
+    if (unlocked.length === 0) {
+      clock.beep('ui_back')
+      return
+    }
+    const ids: (BlessingId | null)[] = [null, ...unlocked]
+    const cur = ids.indexOf(s.blessingId)
+    const i = cur < 0 ? 0 : (cur + dir + ids.length) % ids.length
+    s.blessingId = ids[i]!
+    refreshFuse()
+    persistPrep()
+    clock.beep('ui')
+  }
+
+  const touchShell = createTouchShell(app, {
+    enterHub: (index) => enterHubItem(index),
+    stepFigure: (dir) => stepFigure(dir),
+    backToHub: () => {
+      s.scene = 'title'
+      clock.beep('ui_back')
+    },
+    injectKey: (key, code = null) => {
+      void clock.resumeIfNeeded()
+      s.pendingKey = key
+      s.pendingCode = code
+    },
+    setPaused: (v) => setPaused(v),
+    abandon: () => abandonRun(s, io),
+    startRun: () => {
+      void clock.resumeIfNeeded()
+      void startRun()
+    },
+    setRunMode: (mode) => {
+      s.runMode = mode
+      persistPrep()
+      clock.beep('ui')
+    },
+    setStarter: (id) => {
+      if (!STARTERS.some((st) => st.id === id)) return
+      s.starterId = id as StarterId
+      refreshFuse()
+      persistPrep()
+      clock.beep('ui')
+    },
+    cycleBlessing: cycleBlessingTouch,
+    toggleContract: (id) => {
+      const r = toggleContract(s.contractIds, id as ContractId)
+      s.contractIds = r.next
+      persistPrep()
+      clock.beep(r.ok ? 'ui' : 'ui_back')
+    },
+    buyShop: (index) => {
+      const good = SHOP_GOODS[index]
+      if (!good) return
+      s.shopIndex = index
+      const r = tryBuy(good.id)
+      clock.beep(r.ok ? 'ui_ok' : 'ui_back')
+    },
+    nudgeOptionAt: (row, dir) => {
+      s.optionsRow = row
+      if (row === 0) applyMusicGain(clock.getMusicGain() + 0.05 * dir)
+      else if (row === 1) applySfxGain(clock.getSfxGain() + 0.05 * dir)
+      else stepHubTheme(dir > 0 ? 1 : -1)
+      clock.beep(row < 2 ? 'ui_tick' : 'ui')
+    },
+    setCodexTab: (tab) => {
+      if (s.codexTab !== tab) {
+        s.codexTab = tab
+        s.codexIndex = 0
+        clock.beep('ui')
+      }
+    },
+    stepCodexEntry: (dir) => {
+      s.codexIndex = wrapCodexIndex(s.codexTab, s.codexIndex + dir)
+      clock.beep('ui')
+    },
+    focusPrep: (focus) => {
+      s.prepFocus = focus
+    },
+  })
+
   const closet = renderer.wardrobe
     ? createWardrobe(app, renderer.wardrobe)
     : null
@@ -569,7 +666,26 @@ export async function boot(app: HTMLElement, opts: BootOptions = {}): Promise<()
 
     closet?.setVisible(s.scene === 'closet')
     syncCodexFigure()
-    renderer.draw(buildSnapshot(s, io))
+    const snap = buildSnapshot(s, io)
+    touchShell.sync(snap, { touch: touchMode === 'touch', paused: s.paused })
+    const showPad =
+      touchMode === 'touch' &&
+      s.scene === 'play' &&
+      !!s.world &&
+      !s.paused &&
+      !s.world.offer &&
+      !s.fadeTx
+    touchPad.setVisible(showPad)
+    if (showPad) {
+      touchPad.sync({
+        heatFill: snap.heatMax > 0 ? snap.heat / snap.heatMax : 0,
+        feverCooldown: snap.feverCooldown,
+        feverActive: snap.feverActive,
+        feverMute: snap.feverMute,
+        dashCd: snap.dashCd,
+      })
+    }
+    renderer.draw(snap)
     input.endFrame()
     raf = requestAnimationFrame(frame)
   }
@@ -578,11 +694,14 @@ export async function boot(app: HTMLElement, opts: BootOptions = {}): Promise<()
   return () => {
     cancelAnimationFrame(raf)
     window.removeEventListener('resize', onResize)
+    window.removeEventListener('resize', refreshUiMode)
     window.removeEventListener('keydown', onKey)
     document.removeEventListener('visibilitychange', syncBackgroundAudio)
     window.removeEventListener('blur', syncBackgroundAudio)
     window.removeEventListener('focus', syncBackgroundAudio)
     input.dispose()
+    touchPad.dispose()
+    touchShell.dispose()
     tune.dispose()
     closet?.dispose()
     clock.stop()

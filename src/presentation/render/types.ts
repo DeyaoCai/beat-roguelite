@@ -314,6 +314,10 @@ export type FrameSnapshot = {
   fadeBlack: number
   /** 局内暂停叠层。 */
   paused: boolean
+  /** 触控壳开启（窄屏 / 粗指针 / ?ui=touch）。 */
+  touchUi: boolean
+  /** 0..1 闪避冷却剩余比例（0 = 就绪）。 */
+  dashCd: number
 }
 
 export interface Renderer {

@@ -59,13 +59,13 @@ export function drawPlayHud(
     !!snap.offer && snap.pickReason != null && snap.pickReason !== 'wave'
   if (!midOffer) drawRun(ctx, w, snap)
 
-  drawKit(ctx, lay.panel.x, h, snap)
+  drawKit(ctx, lay.panel.x, lay.thumbTop, snap)
   drawUpgradePanel(ctx, w, h, lay, snap)
   drawRailChrome(ctx, w, h, snap)
   drawBossBar(ctx, w, h, snap)
   drawLevelUp(ctx, w, h, snap)
-  drawHint(ctx, w, h, snap.hint)
-  if (snap.paused) drawPauseOverlay(ctx, w, h)
+  drawHint(ctx, w, lay.thumbTop, snap.hint)
+  if (snap.paused && !snap.touchUi) drawPauseOverlay(ctx, w, h)
 }
 
 function drawPauseOverlay(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -280,34 +280,35 @@ function drawTally(
 }
 
 function drawRun(ctx: CanvasRenderingContext2D, w: number, snap: FrameSnapshot) {
-  const colW = Math.min(228, Math.max(180, w * 0.2))
-  const x = w - colW - Math.max(14, w * 0.018)
-  const y = 14
-  const inner = 12
+  const touch = snap.touchUi
+  const colW = Math.min(touch ? 168 : 228, Math.max(touch ? 132 : 180, w * (touch ? 0.32 : 0.2)))
+  const x = w - colW - Math.max(touch ? 10 : 14, w * 0.018)
+  const y = touch ? Math.max(10, Math.round(w > 0 ? 10 : 14)) : 14
+  const inner = touch ? 10 : 12
   const threat = snap.eliteAlive || snap.bossAlive
-  const hasNext = !!snap.weatherNextName
-  const panelH = (threat ? 108 : 92) + (hasNext ? 16 : 0)
+  const hasNext = !!snap.weatherNextName && !touch
+  const panelH = (threat ? (touch ? 86 : 108) : touch ? 72 : 92) + (hasNext ? 16 : 0)
   paintPanel(ctx, x, y, colW, panelH, threat ? 'rgba(251, 113, 133, 0.45)' : 'rgba(232, 160, 74, 0.32)', threat ? '#fb7185' : '#e8a04a')
 
   const waveLabel = snap.runMode === 'endless' ? `WAVE ${snap.wave}` : `WAVE ${snap.wave} / 5`
   ctx.textAlign = 'left'
   ctx.fillStyle = '#e8a04a'
   ctx.font = `700 10px ${FONT}`
-  ctx.fillText('天气', x + inner, y + inner + 8)
+  ctx.fillText(touch ? '天' : '天气', x + inner, y + inner + 8)
   ctx.textAlign = 'right'
   ctx.fillStyle = '#b8a894'
   ctx.fillText(waveLabel, x + colW - inner, y + inner + 8)
 
   ctx.textAlign = 'left'
   ctx.fillStyle = '#f3ead8'
-  ctx.font = `700 15px ${FONT}`
-  ctx.fillText(snap.weatherName || '晴', x + inner, y + inner + 26)
+  ctx.font = `700 ${touch ? 13 : 15}px ${FONT}`
+  ctx.fillText(snap.weatherName || '晴', x + inner, y + inner + (touch ? 24 : 26))
 
   ctx.fillStyle = '#c9a882'
   ctx.font = `11px ${FONT}`
   const blurb = snap.weatherBlurb || ''
-  if (blurb) ctx.fillText(blurb, x + inner, y + inner + 42, colW - inner * 2)
-  let barY = y + inner + 50
+  if (blurb && !touch) ctx.fillText(blurb, x + inner, y + inner + 42, colW - inner * 2)
+  let barY = y + inner + (touch ? 34 : 50)
   if (hasNext) {
     ctx.fillStyle = '#9ca3af'
     ctx.font = `10px ${FONT}`
@@ -327,14 +328,14 @@ function drawRun(ctx: CanvasRenderingContext2D, w: number, snap: FrameSnapshot) 
 function drawKit(
   ctx: CanvasRenderingContext2D,
   left: number,
-  h: number,
+  floorY: number,
   snap: FrameSnapshot,
 ) {
-  const slotW = 56
-  const slotH = 52
-  const gap = 8
+  const slotW = snap.touchUi ? 48 : 56
+  const slotH = snap.touchUi ? 46 : 52
+  const gap = snap.touchUi ? 6 : 8
   const weapons = snap.weapons
-  const y = h - 78
+  const y = floorY - slotH - (snap.touchUi ? 8 : 26)
   for (let i = 0; i < weapons.length; i++) {
     const wp = weapons[i]!
     const x = left + i * (slotW + gap)
@@ -955,13 +956,13 @@ function drawLevelUp(ctx: CanvasRenderingContext2D, w: number, h: number, snap: 
   ctx.textAlign = 'left'
 }
 
-function drawHint(ctx: CanvasRenderingContext2D, w: number, h: number, hint: string) {
+function drawHint(ctx: CanvasRenderingContext2D, w: number, floorY: number, hint: string) {
   if (!hint) return
   ctx.font = `700 13px ${FONT}`
   const tw = Math.min(w - 48, ctx.measureText(hint).width + 28)
   const ph = 28
   const x = (w - tw) / 2
-  const y = h - 38
+  const y = floorY - ph - 8
   ctx.fillStyle = 'rgba(22, 14, 10, 0.86)'
   ctx.strokeStyle = 'rgba(232, 160, 74, 0.4)'
   ctx.lineWidth = 1

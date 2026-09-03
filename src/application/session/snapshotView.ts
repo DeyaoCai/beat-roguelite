@@ -19,6 +19,7 @@ import {
 import { loadMeta, shopStackCount, shopStatus, START_FUSE_MAX } from '../../content/metaStore'
 import { formatTrackDuration } from '../../content/tracks'
 import { isRhythmEnabled } from '../../lib/rhythmEnabled'
+import { resolveUiMode } from '../../lib/uiMode'
 import { weatherById } from '../../content/weather'
 import { hubThemeById } from '../../content/hubThemes'
 import { codexAt, wrapCodexIndex, codexPreviewOf } from '../../content/codex'
@@ -92,6 +93,7 @@ function stampMeta(s: SessionState, io: SessionIO, snap: FrameSnapshot): FrameSn
   snap.audioMid = a.mid
   snap.audioEnergy = a.energy
   snap.beatPhase = io.clock.beatPhase || snap.beatPhase
+  snap.touchUi = resolveUiMode() === 'touch'
   return snap
 }
 
@@ -113,11 +115,19 @@ function playHint(s: SessionState): string {
     if (world.pickReason === 'chest') return '宝箱 · 遗物 · 小键盘 1/2/3'
     return '升级 · 小强化 · 小键盘 1/2/3'
   }
-  if (s.paused) return '已暂停 · Esc 继续 · Enter 结束本局'
+  if (s.paused) {
+    return resolveUiMode() === 'touch'
+      ? '已暂停'
+      : '已暂停 · Esc 继续 · Enter 结束本局'
+  }
   if (world.loadout.muteBeat || !isRhythmEnabled()) {
     return world.loadout.muteFever
-      ? 'WASD 走位 · Shift 闪避 · Fever 锁'
-      : 'WASD 走位 · Shift 闪避 · F 放 Fever'
+      ? resolveUiMode() === 'touch'
+        ? '摇杆走位 · 闪避'
+        : 'WASD 走位 · Shift 闪避 · Fever 锁'
+      : resolveUiMode() === 'touch'
+        ? '摇杆走位 · Fever · 闪避'
+        : 'WASD 走位 · Shift 闪避 · F 放 Fever'
   }
   if (world.loadout.muteFever) {
     return 'J/K/L 打谱 · WASD 走位 · Shift 闪避 · Fever 锁'
@@ -237,5 +247,6 @@ export function buildSnapshot(s: SessionState, io: SessionIO): FrameSnapshot {
   )
   base.fadeBlack = s.fadeBlack
   base.paused = s.paused
+  base.touchUi = resolveUiMode() === 'touch'
   return base
 }

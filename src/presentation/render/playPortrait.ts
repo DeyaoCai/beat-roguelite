@@ -17,49 +17,59 @@ export type PlayCamLayout = {
   full: CamWell
   /** Fever swaps the bottom-right well to full-body. */
   featured: 'bust' | 'full'
+  /** Touch: Y above which kit / hints should stay (thumb zone below). */
+  thumbTop: number
 }
 
 export function playCamLayout(w: number, h: number, snap: FrameSnapshot): PlayCamLayout {
-  const pad = Math.max(14, w * 0.018)
+  const touch = snap.touchUi
+  const landscape = touch && w > h
+  const pad = Math.max(touch ? 10 : 14, w * 0.018)
+  const safeTop = touch ? Math.max(10, Math.round(h * 0.012)) : 14
+  const thumbTop = touch ? Math.round(h * (landscape ? 0.62 : 0.7)) : h
   const hasStatus =
     snap.player.slowT > 0 ||
     snap.player.poisonT > 0 ||
     snap.player.bleedT > 0 ||
     snap.player.shieldOn
-  const face = Math.round(Math.min(112, Math.max(88, Math.min(w, h) * 0.11)))
-  const gap = 10
-  const barsW = Math.min(200, Math.max(152, w * 0.175))
-  const barsH = 96 + (hasStatus ? 16 : 0)
-  const inset = 10
+  const face = Math.round(
+    Math.min(touch ? 96 : 112, Math.max(touch ? 72 : 88, Math.min(w, h) * (touch ? 0.09 : 0.11))),
+  )
+  const gap = touch ? 8 : 10
+  const barsW = Math.min(touch ? 168 : 200, Math.max(touch ? 128 : 152, w * (touch ? 0.28 : 0.175)))
+  const barsH = (touch ? 88 : 96) + (hasStatus ? 16 : 0)
+  const inset = touch ? 8 : 10
   const panelH = Math.max(inset * 2 + face, inset + barsH + 6)
   const panelW = inset + face + gap + barsW + inset
   const panelX = pad
-  const panelY = 14
+  const panelY = safeTop
   const faceX = panelX + inset
   const faceY = panelY + Math.round((panelH - face) / 2)
   const barsX = faceX + face + gap
   const radioX = panelX + panelW + gap
 
-  // 半身 / 全身互斥：右下角同一机位窗
   const featured: 'bust' | 'full' = snap.feverActive ? 'full' : 'bust'
-  const wellW = Math.round(Math.min(176, Math.max(132, w * 0.145)))
-  const wellH = featured === 'full' ? Math.round(wellW * 1.32) : wellW
+  const hideWell = touch && (w < 520 || landscape)
+  const wellW = hideWell ? 0 : Math.round(Math.min(176, Math.max(132, w * 0.145)))
+  const wellH = wellW <= 0 ? 0 : featured === 'full' ? Math.round(wellW * 1.32) : wellW
   const well: CamWell = {
     x: w - pad - wellW,
-    y: h - pad - wellH,
+    y: wellW <= 0 ? 0 : Math.min(h - pad - wellH, thumbTop - wellH - 8),
     w: wellW,
     h: wellH,
   }
   const hidden: CamWell = { x: 0, y: 0, w: 0, h: 0 }
+  const radioW = hideWell ? 0 : Math.min(face, Math.max(0, w - radioX - pad))
 
   return {
     panel: { x: panelX, y: panelY, w: panelW, h: panelH },
     face: { x: faceX, y: faceY, w: face, h: face },
-    radio: { x: radioX, y: faceY, w: face, h: face },
+    radio: radioW > 0 ? { x: radioX, y: faceY, w: radioW, h: face } : hidden,
     bars: { x: barsX, y: panelY + inset, w: barsW },
-    full: featured === 'full' ? well : hidden,
-    bust: featured === 'bust' ? well : hidden,
+    full: featured === 'full' && wellW > 0 ? well : hidden,
+    bust: featured === 'bust' && wellW > 0 ? well : hidden,
     featured,
+    thumbTop,
   }
 }
 
@@ -75,11 +85,11 @@ export function drawPlayPortraitChrome(
   const fever = snap.feverActive
 
   drawWell(ctx, lay.face, '特写', 'face', hurt, fever)
-  drawWell(ctx, lay.radio, '通讯', 'idle', 0, false)
+  if (lay.radio.w > 0) drawWell(ctx, lay.radio, '通讯', 'idle', 0, false)
   if (fever) drawLightningFrame(ctx, lay.face)
   if (lay.featured === 'bust') {
-    drawWell(ctx, lay.bust, '半身', 'live', hurt, fever)
-  } else {
+    if (lay.bust.w > 0) drawWell(ctx, lay.bust, '半身', 'live', hurt, fever)
+  } else if (lay.full.w > 0) {
     drawWell(ctx, lay.full, fever ? 'FEVER' : '全身', 'live', hurt, fever)
   }
 }

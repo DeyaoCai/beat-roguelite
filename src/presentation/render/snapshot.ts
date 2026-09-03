@@ -2,6 +2,7 @@ import type { AudioClock } from '../../adapters/audio/clock'
 import { FEVER_COOLDOWN_SEC, comboDamageMul } from '../../domain/combat/beatBridge'
 import { bossName } from '../../domain/combat/bosses'
 import { ARENA_HALF } from '../../domain/combat/arena'
+import { DASH_CD } from '../../domain/combat/player'
 import type { ElemSource, Enemy, World } from '../../domain/combat/types'
 import {
   UPGRADE_POOL,
@@ -255,6 +256,8 @@ export function emptySnapshot(scene: SceneKind): FrameSnapshot {
     shopRows: [],
     fadeBlack: 0,
     paused: false,
+    touchUi: false,
+    dashCd: 0,
   }
 }
 
@@ -515,5 +518,7 @@ export function worldToSnapshot(
     shopRows: [],
     fadeBlack: 0,
     paused: false,
+    touchUi: false,
+    dashCd: DASH_CD > 0 ? Math.min(1, world.player.dashCd / DASH_CD) : 0,
   }
 }
