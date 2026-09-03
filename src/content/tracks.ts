@@ -1,14 +1,19 @@
+import { assetUrl, encodePublicPath } from '../lib/assetUrl'
+import { isRhythmEnabled } from '../lib/rhythmEnabled'
+
+/** co_der-resource prefix for beat-roguelite audio/charts (dev-only rhythm layer). */
+export const BEAT_AUDIO_PREFIX = 'beat-roguelite'
+
 /**
- * Tracks: local `.osz` (learning) + sibling co_der-resource onset charts.
+ * Tracks live in co_der-resource. Rhythm layer is dev-only; ship builds omit charts/audio.
  */
 export type TrackDef = {
   id: string
   title: string
   artist: string
   source: 'osz' | 'resource'
-  /** public/ URL path for `.osz` (source=osz) */
+  /** Path under co_der-resource (source=osz) */
   oszPath?: string
-  /** Prefer this difficulty name inside the pack */
   oszPrefer?: string
   /** Path under co_der-resource (source=resource) */
   metaJson?: string
@@ -16,13 +21,13 @@ export type TrackDef = {
   audioFallback?: string
 }
 
-export const TRACKS: TrackDef[] = [
+const ALL_TRACKS: TrackDef[] = [
   {
     id: 'osz_pixel_planet',
     title: 'Pixel Planet',
     artist: 'Lime',
     source: 'osz',
-    oszPath: 'osz/2382059 Lime - Pixel Planet.osz',
+    oszPath: `${BEAT_AUDIO_PREFIX}/osz/2382059 Lime - Pixel Planet.osz`,
     oszPrefer: 'Easy',
   },
   {
@@ -53,22 +58,43 @@ export const TRACKS: TrackDef[] = [
   },
 ]
 
-export const DEFAULT_TRACK_ID = 'osz_pixel_planet'
-
-export function resUrl(relPath: string): string {
-  return `/res/${relPath.split('\\').join('/')}`
+/** Placeholder when rhythm layer is off (no fetch). */
+export const SHIP_SILENT_TRACK: TrackDef = {
+  id: 'ship_silent',
+  title: '素打',
+  artist: '',
+  source: 'resource',
 }
 
-/** Encode each path segment for public/ static files. */
+/** @deprecated use {@link listTracks} */
+export const TRACKS: TrackDef[] = ALL_TRACKS
+
+export function listTracks(): TrackDef[] {
+  return isRhythmEnabled() ? ALL_TRACKS : []
+}
+
+export const DEFAULT_TRACK_ID = 'osz_pixel_planet'
+
+export function defaultTrack(): TrackDef {
+  const tracks = listTracks()
+  return tracks.find((t) => t.id === DEFAULT_TRACK_ID) ?? tracks[0] ?? SHIP_SILENT_TRACK
+}
+
+export function resUrl(relPath: string): string {
+  return assetUrl(`res/${relPath.split('\\').join('/')}`)
+}
+
+/** Encode each path segment for static files under co_der-resource. */
 export function publicUrl(relPath: string): string {
-  return (
-    '/' +
-    relPath
-      .split(/[/\\]/)
-      .filter(Boolean)
-      .map(encodeURIComponent)
-      .join('/')
-  )
+  return resUrl(encodePublicPath(relPath))
+}
+
+export function formatTrackDuration(sec: number): string {
+  if (!Number.isFinite(sec) || sec <= 0) return ''
+  const t = Math.round(sec)
+  const m = Math.floor(t / 60)
+  const s = t % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
 }
 
 export type MusicMeta = {
@@ -77,6 +103,12 @@ export type MusicMeta = {
   duration?: number
   cover?: string
   lrc?: string
+}
+
+/** music.json 有的写秒、有的写毫秒。 */
+export function metaDurationSec(raw?: number): number {
+  if (raw == null || raw <= 0) return 0
+  return raw >= 1000 ? raw / 1000 : raw
 }
 
 async function fetchOk(url: string, timeoutMs = 12_000): Promise<Response> {

@@ -26,22 +26,41 @@ def export_glb(path: str) -> None:
         bpy.ops.export_scene.gltf(**kw)
 
 
-def write_figure_json(out_glb: str, has_idle: bool, has_walk: bool) -> None:
+def write_figure_json(
+    out_glb: str,
+    has_idle: bool,
+    has_walk: bool,
+    pack_id: str = "",
+    caption: str = "",
+    voices: str = "",
+) -> None:
     pack = os.path.normpath(os.path.join(os.path.dirname(out_glb), ".."))
     fig = os.path.join(pack, "figure.json")
     rel = "models/" + os.path.basename(out_glb)
+    prev = {}
+    if os.path.isfile(fig):
+        try:
+            with open(fig, encoding="utf-8") as f:
+                prev = json.load(f)
+        except Exception:
+            prev = {}
+    pid = pack_id or prev.get("id") or os.path.basename(pack)
     data = {
-        "id": "skyrim-female",
-        "caption": "Skyrim 3BA",
+        "id": pid,
+        "caption": caption or prev.get("caption") or pid,
         "body": rel,
-        "height": 1.7,
+        "height": prev.get("height") or 1.7,
         "gaits": {},
-        "capabilities": {"wardrobe": False, "poses": False, "jiggle": False},
+        "capabilities": prev.get("capabilities")
+        or {"wardrobe": False, "poses": False, "jiggle": False},
     }
     if has_idle:
         data["gaits"]["idle"] = rel
     if has_walk:
         data["gaits"]["walk"] = rel
+    voice = voices or prev.get("voices")
+    if voice:
+        data["voices"] = voice
     with open(fig, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, ensure_ascii=False)
         f.write("\n")

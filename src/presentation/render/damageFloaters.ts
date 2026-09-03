@@ -7,7 +7,6 @@ const KIND_RGB: Record<string, [number, number, number]> = {
   aura: [125, 211, 252],
   chain: [56, 189, 248],
   star: [180, 83, 9],
-  orbit: [251, 191, 36],
   fever: [253, 224, 71],
   hit: [254, 240, 138],
 }

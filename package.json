@@ -6,18 +6,26 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:ship": "node scripts/build-ship.mjs",
+    "deploy:pages": "node scripts/deploy-pages.mjs",
     "preview": "vite preview",
     "check:ddd": "node scripts/check-ddd.mjs",
-    "import:tka": "dotnet run --project tools/tka-import -- --out public/figures/tka-jodi/models",
-    "import:tka:force": "dotnet run --project tools/tka-import -- --in inbox --out public/figures/tka-jodi/models --force",
-    "import:tka:poses": "node -e \"const fs=require('fs'); const root='public/figures/tka-jodi/models'; for (const d of ['Achates_Poses','Achates_Sprint']) fs.rmSync(root+'/'+d,{recursive:true,force:true})\" && dotnet run --project tools/tka-import -- --in inbox --out public/figures/tka-jodi/models --only Achates --force",
+    "test": "vitest run",
+    "import:tka": "dotnet run --project tools/tka-import -- --out ../co_der-resource/beat-roguelite/figures/tka-jodi/models",
+    "import:tka:force": "dotnet run --project tools/tka-import -- --in inbox --out ../co_der-resource/beat-roguelite/figures/tka-jodi/models --force",
+    "import:tka:poses": "node -e \"const fs=require('fs'); const root='../co_der-resource/beat-roguelite/figures/tka-jodi/models'; for (const d of ['Achates_Poses','Achates_Sprint']) fs.rmSync(root+'/'+d,{recursive:true,force:true})\" && dotnet run --project tools/tka-import -- --in inbox --out ../co_der-resource/beat-roguelite/figures/tka-jodi/models --only Achates --force",
     "import:tka:game-anims": "dotnet run --project tools/tka-import -- --game-anims",
-    "import:skyrim": "node tools/skyrim-import/run.mjs"
+    "import:skyrim": "node tools/skyrim-import/run.mjs",
+    "import:skyrim:sisters": "node tools/skyrim-import/run.mjs tools/skyrim-import/outfits/vie.json && node tools/skyrim-import/run.mjs tools/skyrim-import/outfits/lite.json && node tools/skyrim-import/run.mjs tools/skyrim-import/outfits/iru.json",
+    "import:skyrim:followers": "node tools/skyrim-import/run.mjs tools/skyrim-import/outfits/sofia.json && node tools/skyrim-import/run.mjs tools/skyrim-import/outfits/folgi.json",
+    "migrate:figures": "node scripts/migrate-figures-to-resource.mjs",
+    "migrate:audio": "node scripts/migrate-audio-to-resource.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.185.4",
     "typescript": "~6.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "fflate": "^0.8.3",

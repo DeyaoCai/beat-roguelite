@@ -1,5 +1,6 @@
 import type { AudioClockPort } from '../shared/ports'
 import type { JudgeResult } from '../rhythm/judge'
+import { FEVER_RULES } from '../../content/rules'
 import { addHeat, heatToMult } from './heat'
 import { norm } from './math'
 import {
@@ -10,16 +11,15 @@ import {
   nearestEnemy,
   pulseAura,
   pulseFlame,
-  pulseOrbit,
 } from './combat'
 import type { World } from './types'
 import { pushEvent } from '../shared/events'
 
 /** Sustained auto-perfect window after the bar fills. */
-export const FEVER_ACTIVE_SEC = 7
+export const FEVER_ACTIVE_SEC = FEVER_RULES.activeSec
 /** Hard lock on refill after the window ends. */
-export const FEVER_COOLDOWN_SEC = 12
-const COMBO_MILESTONES = [10, 25, 50, 100] as const
+export const FEVER_COOLDOWN_SEC = FEVER_RULES.cooldownSec
+const COMBO_MILESTONES = FEVER_RULES.milestones
 
 export function isFeverActive(w: World): boolean {
   return w.stats.feverActiveT > 0
@@ -29,11 +29,14 @@ export function isFeverActive(w: World): boolean {
 export function heatReady(w: World): boolean {
   if (isFeverActive(w) || w.stats.feverCooldownT > 0) return false
   const max = w.loadout.heatCfg.max
-  return max > 0 && w.stats.heat >= max * 0.98
+  return max > 0 && w.stats.heat >= max * FEVER_RULES.readyFrac
 }
 
-export function comboDamageMul(combo: number, cap = 50): number {
-  return 1 + Math.min(combo, cap) * 0.01
+export function comboDamageMul(
+  combo: number,
+  cap: number = FEVER_RULES.defaultComboCap,
+): number {
+  return 1 + Math.min(combo, cap) * FEVER_RULES.comboDmgPerPoint
 }
 
 function noteComboMilestone(w: World, prev: number, next: number, clock: AudioClockPort): void {
@@ -150,8 +153,6 @@ export function applyBeatResult(
     fireChain(w, clock, 0, comboScale * L.chain.beatMul)
   } else if (starter === 'starfall' && L.star) {
     fireStarCast(w, clock, comboScale * L.star.beatMul)
-  } else if (starter === 'orbit' && L.orbit) {
-    pulseOrbit(w, clock, comboScale)
   }
   w.player.invuln = Math.max(w.player.invuln, feverOn ? 0.18 : 0.1)
 }

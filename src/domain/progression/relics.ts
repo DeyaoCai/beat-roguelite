@@ -1,29 +1,23 @@
+import { RELIC_IDS as RELIC_ID_LIST, RELIC_RULES } from '../../content/rules'
 import type { OwnedUpgrade, UpgradeId } from './upgrades'
 
-export const RELIC_IDS = [
-  'relic_ward',
-  'relic_leech',
-  'relic_carapace',
-  'relic_greed',
-  'relic_ember',
-  'relic_spark',
-] as const
+export const RELIC_IDS = RELIC_ID_LIST
 export type RelicId = (typeof RELIC_IDS)[number]
 
-export const RELIC_CAP = 3
-export const CARAPACE_DR = 0.06
-export const CARAPACE_STACK_CAP = 5
-export const SHIELD_REGEN_SEC = 8
-export const LEECH_PER_HIT = 0.045
-export const LEECH_HIT_CAP = 0.16
-export const LEECH_BANK_CAP = 1.15
-export const LEECH_DRAIN_PER_SEC = 0.55
+export const RELIC_CAP = RELIC_RULES.cap
+export const CARAPACE_DR = RELIC_RULES.carapaceDr
+export const CARAPACE_STACK_CAP = RELIC_RULES.carapaceStackCap
+export const SHIELD_REGEN_SEC = RELIC_RULES.shieldRegenSec
+export const LEECH_PER_HIT = RELIC_RULES.leechPerHit
+export const LEECH_HIT_CAP = RELIC_RULES.leechHitCap
+export const LEECH_BANK_CAP = RELIC_RULES.leechBankCap
+export const LEECH_DRAIN_PER_SEC = RELIC_RULES.leechDrainPerSec
 /** 拾荒：本局金币获取。 */
-export const GREED_GOLD_MUL = 1.4
+export const GREED_GOLD_MUL = RELIC_RULES.greedGoldMul
 /** 余烬：位移闪避耗热。 */
-export const EMBER_DASH_HEAT_MUL = 0.55
+export const EMBER_DASH_HEAT_MUL = RELIC_RULES.emberDashHeatMul
 /** 起势：每波开场 Fever 保底。 */
-export const SPARK_FEVER = 40
+export const SPARK_FEVER = RELIC_RULES.sparkFever
 
 export function isRelicId(id: UpgradeId): id is RelicId {
   return (RELIC_IDS as readonly string[]).includes(id)
@@ -46,16 +40,19 @@ export function carapaceStacksForWave(wave: number): number {
 }
 
 export function carapaceDr(stacks: number): number {
-  return Math.min(0.3, stacks * CARAPACE_DR)
+  return Math.min(RELIC_RULES.carapaceDrCap, stacks * CARAPACE_DR)
 }
 
 export function greedGoldMul(owned: OwnedUpgrade[]): number {
   return hasRelic(owned, 'relic_greed') ? GREED_GOLD_MUL : 1
 }
 
-export function dashHeatCost(owned: OwnedUpgrade[], base = 16): number {
+export function dashHeatCost(
+  owned: OwnedUpgrade[],
+  base = RELIC_RULES.dashHeatBase,
+): number {
   if (!hasRelic(owned, 'relic_ember')) return base
-  return Math.max(6, Math.ceil(base * EMBER_DASH_HEAT_MUL))
+  return Math.max(RELIC_RULES.dashHeatMin, Math.ceil(base * EMBER_DASH_HEAT_MUL))
 }
 
 export function sparkFeverFloor(owned: OwnedUpgrade[]): number {

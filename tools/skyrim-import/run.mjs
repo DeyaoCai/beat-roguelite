@@ -114,7 +114,7 @@ function extractAnims(jobPath, blender) {
 
 function stashHkxconv() {
   const dest = path.join(here, 'hkxconv.exe')
-  const stray = path.join(repo, 'public/figures/skyrim-female/models/ori/hkxconv.exe')
+  const stray = path.join(repo, '../co_der-resource/beat-roguelite/figures/skyrim-female/models/ori/hkxconv.exe')
   if (!fs.existsSync(stray)) return
   fs.renameSync(stray, dest)
   console.log('moved hkxconv.exe out of public/')

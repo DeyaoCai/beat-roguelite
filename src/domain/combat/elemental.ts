@@ -1,20 +1,19 @@
+import { ARMOR_BY_KIND, ELEM_RULES, FOE_SHOT } from '../../content/rules'
 import { moveWithObstacles } from './map'
 import { sampleGround } from './weather'
 import type { ElemSource, Enemy, EnemyKind, World } from './types'
 import { waveArmorBonus, waveAtkMul } from './waveScale'
 
-export const ELEM_MAX_STACKS = 3
-const AMP_MUL = 1.32
-const WEAK_MUL = 0.65
-const BREAK_STRIP = 0.25
-const AMP_SEC = 3.2
-const BREAK_SEC = 3.2
-const WEAK_SEC = 3.2
-const BLEED_SEC = 2.6
-const BLEED_DPS = 0.5
-const FREEZE_SEC = 1.35
-const EXPLODE_R = 2.35
-const EXPLODE_LOCK = 0.22
+export const ELEM_MAX_STACKS = ELEM_RULES.maxStacks
+const AMP_MUL = ELEM_RULES.ampMul
+const WEAK_MUL = ELEM_RULES.weakMul
+const BREAK_STRIP = ELEM_RULES.breakStrip
+const AMP_SEC = ELEM_RULES.ampSec
+const BREAK_SEC = ELEM_RULES.breakSec
+const WEAK_SEC = ELEM_RULES.weakSec
+const FREEZE_SEC = ELEM_RULES.freezeSec
+const EXPLODE_R = ELEM_RULES.explodeR
+const EXPLODE_LOCK = ELEM_RULES.explodeLock
 
 const EMPTY_STACKS = (): Record<ElemSource, number> => ({
   flame: 0,
@@ -22,24 +21,17 @@ const EMPTY_STACKS = (): Record<ElemSource, number> => ({
   aura: 0,
   chain: 0,
   star: 0,
-  orbit: 0,
 })
 
 export function armorForKind(kind: EnemyKind): number {
-  if (kind === 'boss') return 0.42
-  if (kind === 'elite') return 0.36
-  if (kind === 'brute') return 0.3
-  if (kind === 'chest') return 0.22
-  if (kind === 'leech') return 0.1
-  if (kind === 'frost' || kind === 'spitter') return 0.06
-  if (kind === 'shooter') return 0.03
-  return 0.02
+  return ARMOR_BY_KIND[kind] ?? ARMOR_BY_KIND.chaser ?? 0.02
 }
 
-export function idleCombat(kind: EnemyKind, wave = 1) {
+export function idleCombat(kind: EnemyKind, wave = 1, metaArmor?: number) {
+  const base = metaArmor ?? armorForKind(kind)
   return {
     hurtFlash: 0,
-    armor: Math.min(0.5, armorForKind(kind) + waveArmorBonus(wave)),
+    armor: Math.min(ELEM_RULES.armorCap, base + waveArmorBonus(wave)),
     slowT: 0,
     slowMul: 1,
     freezeT: 0,
@@ -47,12 +39,11 @@ export function idleCombat(kind: EnemyKind, wave = 1) {
     breakT: 0,
     weakT: 0,
     explodeLockT: 0,
-    orbitHitT: 0,
-    bleedT: 0,
-    bleedDps: 0,
-    bleedAcc: 0,
     elemStacks: EMPTY_STACKS(),
     atkMul: waveAtkMul(wave),
+    knockT: 0,
+    knockVx: 0,
+    knockVz: 0,
   }
 }
 
@@ -63,7 +54,14 @@ export function incomingMul(e: Enemy): number {
 
 export function outgoingMul(e: Enemy): number {
   const base = e.atkMul > 0 ? e.atkMul : 1
-  return base * (e.weakT > 0 ? WEAK_MUL : 1)
+  const role = e.meta.role
+  const hit =
+    role === 'boss'
+      ? FOE_SHOT.bossHitMul
+      : role === 'elite'
+        ? FOE_SHOT.eliteHitMul
+        : FOE_SHOT.fodderHitMul
+  return base * hit * (e.weakT > 0 ? WEAK_MUL : 1)
 }
 
 export function enemyMoveMul(e: Enemy): number {
@@ -82,9 +80,43 @@ function crowdDur(e: Enemy, sec: number): number {
 }
 
 function crowdPush(e: Enemy, dist: number): number {
-  if (e.kind === 'boss') return dist * 0.28
-  if (e.kind === 'elite') return dist * 0.45
+  if (e.kind === 'boss') return dist * 0.35
+  if (e.kind === 'elite') return dist * 0.55
   return dist
+}
+
+const KNOCK_SLIDE = 0.22
+
+export function tickEnemyKnock(w: World, e: Enemy, dt: number): void {
+  if (e.knockT <= 0) {
+    e.knockVx = 0
+    e.knockVz = 0
+    return
+  }
+  e.knockT = Math.max(0, e.knockT - dt)
+  if (e.freezeT > 0) {
+    if (e.knockT <= 0) {
+      e.knockVx = 0
+      e.knockVz = 0
+    }
+    return
+  }
+  const lim = w.arena.half - e.r
+  const next = moveWithObstacles(
+    e.x,
+    e.z,
+    e.knockVx * dt,
+    e.knockVz * dt,
+    e.r,
+    w.obstacles,
+    lim,
+  )
+  e.x = next.x
+  e.z = next.z
+  if (e.knockT <= 0) {
+    e.knockVx = 0
+    e.knockVz = 0
+  }
 }
 
 function procActive(e: Enemy, src: ElemSource): boolean {
@@ -92,7 +124,6 @@ function procActive(e: Enemy, src: ElemSource): boolean {
   if (src === 'orb') return e.explodeLockT > 0
   if (src === 'aura') return e.freezeT > 0
   if (src === 'chain') return e.ampT > 0
-  if (src === 'orbit') return e.bleedT > 0
   return e.weakT > 0
 }
 
@@ -107,20 +138,6 @@ export function tickEnemyStatuses(w: World, dt: number): void {
     if (e.breakT > 0) e.breakT = Math.max(0, e.breakT - dt)
     if (e.weakT > 0) e.weakT = Math.max(0, e.weakT - dt)
     if (e.explodeLockT > 0) e.explodeLockT = Math.max(0, e.explodeLockT - dt)
-    if (e.orbitHitT > 0) e.orbitHitT = Math.max(0, e.orbitHitT - dt)
-    if (e.bleedT > 0) {
-      e.bleedT = Math.max(0, e.bleedT - dt)
-      e.bleedAcc += e.bleedDps * dt
-      while (e.bleedAcc >= 0.4 && e.hp > 0) {
-        e.bleedAcc -= 0.4
-        e.hp -= 0.4 * incomingMul(e)
-        e.hurtFlash = 0.1
-      }
-      if (e.bleedT <= 0) {
-        e.bleedDps = 0
-        e.bleedAcc = 0
-      }
-    }
   }
 }
 
@@ -135,23 +152,45 @@ export function applyKnockback(w: World, e: Enemy): void {
   let dist = crowdPush(e, w.loadout.knockback)
   if (dist <= 0) return
   if (sampleGround(w, e.x, e.z).ice) dist *= 1.4
+  let dx = e.x - w.player.x
+  let dz = e.z - w.player.z
+  let len = Math.hypot(dx, dz)
+  if (len < 0.08) {
+    dx = w.player.facingX
+    dz = w.player.facingZ
+    len = Math.hypot(dx, dz) || 1
+  }
+  dx /= len
+  dz /= len
+  const fresh = e.knockT <= 0.04
+  const speed = dist / KNOCK_SLIDE
+  e.knockVx = dx * speed
+  e.knockVz = dz * speed
+  e.knockT = KNOCK_SLIDE
   const lim = w.arena.half - e.r
-  const next = moveWithObstacles(
-    e.x,
-    e.z,
-    w.player.facingX * dist,
-    w.player.facingZ * dist,
-    e.r,
-    w.obstacles,
-    lim,
-  )
+  const snap = dist * 0.35
+  const next = moveWithObstacles(e.x, e.z, dx * snap, dz * snap, e.r, w.obstacles, lim)
   e.x = next.x
   e.z = next.z
+  if (fresh || w.loadout.graft.knockback) {
+    w.fxPops.push({
+      x: e.x,
+      z: e.z,
+      kind: 'knock',
+      dirX: dx,
+      dirZ: dz,
+      life: 0.2,
+      maxLife: 0.2,
+    })
+    if (w.fxPops.length > 16) w.fxPops.splice(0, w.fxPops.length - 16)
+  }
 }
 
 export type ElemProc = { explode: { x: number; z: number; r: number; dmg: number } } | null
 
-/** Stack this weapon's 元素伤. Returns explode splash if 火 proc'd. */
+const ELEM_SRCS: ElemSource[] = ['flame', 'orb', 'aura', 'chain', 'star']
+
+/** Stack this 元素伤. Returns explode splash if 火 proc'd. */
 export function noteElemHit(w: World, e: Enemy, src: ElemSource, hitDmg: number): ElemProc {
   if (!w.loadout.elem[src]) return null
   if (procActive(e, src)) return null
@@ -170,11 +209,6 @@ export function noteElemHit(w: World, e: Enemy, src: ElemSource, hitDmg: number)
     e.weakT = WEAK_SEC
     return null
   }
-  if (src === 'orbit') {
-    e.bleedT = crowdDur(e, BLEED_SEC)
-    e.bleedDps = BLEED_DPS
-    return null
-  }
   if (src === 'aura') {
     e.freezeT = crowdDur(e, FREEZE_SEC)
     return null
@@ -188,4 +222,14 @@ export function noteElemHit(w: World, e: Enemy, src: ElemSource, hitDmg: number)
       dmg: Math.max(0.4, hitDmg * 0.85),
     },
   }
+}
+
+/** 已学的元素伤都叠；不限这下是哪门打的。 */
+export function noteOwnedElemHits(w: World, e: Enemy, hitDmg: number): ElemProc {
+  let explode: ElemProc = null
+  for (const src of ELEM_SRCS) {
+    const proc = noteElemHit(w, e, src, hitDmg)
+    if (proc?.explode) explode = proc
+  }
+  return explode
 }

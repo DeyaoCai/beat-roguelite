@@ -1,3 +1,5 @@
+import { HEAT_RULES } from '../../content/rules'
+
 export type HeatConfig = {
   max: number
   decayPerSec: number
@@ -9,18 +11,9 @@ export type HeatConfig = {
   hurtLoss: number
 }
 
-export const DEFAULT_HEAT: HeatConfig = {
-  max: 100,
-  decayPerSec: 6,
-  hitGain: 0.85,
-  killGain: 6,
-  perfectGain: 10,
-  goodGain: 5,
-  missLoss: 4,
-  hurtLoss: 12,
-}
+export const DEFAULT_HEAT: HeatConfig = { ...HEAT_RULES }
 
-export function heatToMult(heat: number, max = 100): number {
+export function heatToMult(heat: number, max: number = HEAT_RULES.max): number {
   return 1 + Math.max(0, Math.min(heat, max)) / max
 }
 

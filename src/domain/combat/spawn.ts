@@ -1,23 +1,41 @@
 import type { AudioClockPort } from '../shared/ports'
+import {
+  BOSS_SPAWN_PHASE,
+  FOE_SHOT,
+  FODDER_KINDS,
+  FODDER_UNLOCK_WAVE,
+  PREFER_TRASH_WEIGHT,
+  SPAWN_DENSITY,
+  SPAWN_PLACE,
+  SPAWN_PHASES,
+  SPAWN_RATE,
+  SPAWN_TIMING,
+  SPECIAL_HP,
+  type SpawnFodderKind,
+  type SpawnPhaseCfg,
+} from '../../content/rules'
 import { clamp, norm } from './math'
 import { hitsObstacle, moveWithObstacles } from './map'
+import { makeEnemyMeta } from './enemyMeta'
+import { makeFoeBulletMeta } from './bulletMeta'
 import { bossDefForWave, tickBoss } from './bosses'
 import { hitEffectForKind } from './status'
-import { enemyMoveMul, idleCombat, isFrozen, outgoingMul, tickEnemyStatuses } from './elemental'
+import { enemyMoveMul, idleCombat, isFrozen, outgoingMul, tickEnemyKnock, tickEnemyStatuses } from './elemental'
 import { displaceEnemyGround, groundMoveMul } from './weather'
 import { bossHpMul, fodderHp, scaleEnemySpeed } from './waveScale'
+import { pushHint } from './hints'
 import type { Enemy, EnemyKind, HitEffect, World } from './types'
 
 /** Don't spawn until this many seconds into the wave. */
-export const SPAWN_OPEN_SEC = 2.4
+export const SPAWN_OPEN_SEC = SPAWN_TIMING.openSec
 /** First elite not before this many seconds (also gated by phase progress). */
-export const ELITE_FIRST_SEC = 18
+export const ELITE_FIRST_SEC = SPAWN_TIMING.eliteFirstSec
 /** Boss spawn time cap (clamped by track length). */
-export const BOSS_AT_SEC = 78
+export const BOSS_AT_SEC = SPAWN_TIMING.bossAtSec
 /** Boss 最早也要等这么久（给脆皮练级窗）。 */
-export const BOSS_EARLIEST_SEC = 52
+export const BOSS_EARLIEST_SEC = SPAWN_TIMING.bossEarliestSec
 /** 波 1～2：至少升到该等级才放 Boss（否则继续刷脆皮给经验）。 */
-export const BOSS_MIN_LEVEL_EARLY = 2
+export const BOSS_MIN_LEVEL_EARLY = SPAWN_TIMING.bossMinLevelEarly
 
 type FodderSpec = {
   kind: EnemyKind
@@ -27,111 +45,7 @@ type FodderSpec = {
   shootCd: number
 }
 
-type PhaseId = 'intro' | 'build' | 'spice' | 'pressure' | 'boss'
-
-type PhaseCfg = {
-  id: PhaseId
-  /** Song progress [0,1) upper bound for this phase (boss overrides). */
-  until: number
-  maxBase: number
-  maxPerWave: number
-  /** Multiplier on base spawn interval (higher = slower). */
-  rateMul: number
-  packIdle: number
-  packBusy: number
-  elite: boolean
-  /** Seconds between elites in this phase. */
-  eliteEvery: number
-  /** Relative roll weights for fodder kinds. */
-  weights: Partial<Record<EnemyKind, number>>
-}
-
-/**
- * Phases scale with track length via waveTime/waveDuration.
- * Short tracks compress; long tracks stretch — types unlock by %.
- */
-const PHASES: PhaseCfg[] = [
-  {
-    id: 'intro',
-    until: 0.32,
-    maxBase: 8,
-    maxPerWave: 1,
-    rateMul: 1.05,
-    packIdle: 2,
-    packBusy: 3,
-    elite: false,
-    eliteEvery: 99,
-    weights: { chaser: 1 },
-  },
-  {
-    id: 'build',
-    until: 0.5,
-    maxBase: 10,
-    maxPerWave: 2,
-    rateMul: 0.95,
-    packIdle: 2,
-    packBusy: 3,
-    elite: false,
-    eliteEvery: 99,
-    weights: { chaser: 0.72, shooter: 0.28 },
-  },
-  {
-    id: 'spice',
-    until: 0.7,
-    maxBase: 13,
-    maxPerWave: 2,
-    rateMul: 0.85,
-    packIdle: 2,
-    packBusy: 3,
-    elite: true,
-    eliteEvery: 22,
-    weights: {
-      chaser: 0.5,
-      shooter: 0.28,
-      brute: 0.08,
-      frost: 0.08,
-      spitter: 0.06,
-    },
-  },
-  {
-    id: 'pressure',
-    until: 1,
-    maxBase: 15,
-    maxPerWave: 3,
-    rateMul: 0.78,
-    packIdle: 2,
-    packBusy: 3,
-    elite: true,
-    eliteEvery: 16,
-    weights: {
-      chaser: 0.4,
-      shooter: 0.22,
-      brute: 0.08,
-      frost: 0.12,
-      spitter: 0.1,
-      leech: 0.08,
-    },
-  },
-]
-
-const BOSS_PHASE: PhaseCfg = {
-  id: 'boss',
-  until: 1,
-  maxBase: 9,
-  maxPerWave: 2,
-  rateMul: 1.1,
-  packIdle: 2,
-  packBusy: 2,
-  elite: false,
-  eliteEvery: 99,
-  weights: {
-    chaser: 0.55,
-    shooter: 0.25,
-    brute: 0.05,
-    frost: 0.08,
-    spitter: 0.07,
-  },
-}
+type PhaseCfg = SpawnPhaseCfg
 
 function aiDefaults(rng: () => number): Pick<
   Enemy,
@@ -155,28 +69,87 @@ function songProgress(w: World): number {
   return clamp(w.waveTime / d, 0, 1)
 }
 
-export function spawnPhaseAt(w: World, bossAlive: boolean): PhaseCfg {
-  if (bossAlive) return BOSS_PHASE
-  const p = songProgress(w)
-  for (const phase of PHASES) {
-    if (p < phase.until) return phase
-  }
-  return PHASES[PHASES.length - 1]!
+function bossAtSec(w: World): number {
+  return Math.min(
+    BOSS_AT_SEC,
+    Math.max(BOSS_EARLIEST_SEC, w.waveDuration * SPAWN_TIMING.bossProgressFrac),
+  )
 }
 
-function pickSpawnPos(w: World): { x: number; z: number } {
+export function spawnPhaseAt(w: World, bossAlive: boolean): PhaseCfg {
+  if (bossAlive) return BOSS_SPAWN_PHASE
+  const p = songProgress(w)
+  for (const phase of SPAWN_PHASES) {
+    if (p < phase.until) return phase
+  }
+  return SPAWN_PHASES[SPAWN_PHASES.length - 1]!
+}
+
+function distToPlayer(w: World, x: number, z: number): number {
+  return Math.hypot(x - w.player.x, z - w.player.z)
+}
+
+function onSpawnDisk(x: number, z: number): boolean {
+  return Math.hypot(x, z) < SPAWN_PLACE.spawnDiskR
+}
+
+function spawnBlocked(w: World, x: number, z: number, r: number): boolean {
+  if (hitsObstacle(x, z, r, w.obstacles)) return true
+  if (onSpawnDisk(x, z)) return true
+  for (const e of w.enemies) {
+    if (Math.hypot(e.x - x, e.z - z) < SPAWN_PLACE.foeSep + e.r * 0.35) return true
+  }
+  return false
+}
+
+function tryPos(
+  w: World,
+  x: number,
+  z: number,
+  minPlayer: number,
+  maxPlayer: number,
+): { x: number; z: number } | null {
   const half = w.arena.half - 1.2
-  const wave = w.stats.wave
-  const minR = 10.5
-  const maxR = Math.min(18 + wave * 0.6, half * 0.85)
-  for (let i = 0; i < 20; i++) {
+  x = clamp(x, -half, half)
+  z = clamp(z, -half, half)
+  const d = distToPlayer(w, x, z)
+  if (d < minPlayer || d > maxPlayer) return null
+  if (spawnBlocked(w, x, z, 0.45)) return null
+  return { x, z }
+}
+
+function pickAround(
+  w: World,
+  cx: number,
+  cz: number,
+  jitter: number,
+  minPlayer: number,
+  maxPlayer: number,
+): { x: number; z: number } | null {
+  for (let i = 0; i < 16; i++) {
     const ang = w.rng() * Math.PI * 2
-    const rad = minR + w.rng() * Math.max(2.5, maxR - minR)
-    const x = clamp(w.player.x + Math.cos(ang) * rad, -half, half)
-    const z = clamp(w.player.z + Math.sin(ang) * rad, -half, half)
-    if (Math.hypot(x - w.player.x, z - w.player.z) < minR * 0.72) continue
-    if (hitsObstacle(x, z, 0.45, w.obstacles)) continue
-    return { x, z }
+    const rad = (0.35 + w.rng() * 0.65) * jitter
+    const hit = tryPos(w, cx + Math.cos(ang) * rad, cz + Math.sin(ang) * rad, minPlayer, maxPlayer)
+    if (hit) return hit
+  }
+  return tryPos(w, cx, cz, minPlayer, maxPlayer)
+}
+
+function pickPressurePos(w: World): { x: number; z: number } {
+  const half = w.arena.half - 1.2
+  const minR = SPAWN_PLACE.pressureMin
+  const maxR = Math.min(SPAWN_PLACE.pressureMax, half * 0.7)
+  for (let i = 0; i < 22; i++) {
+    const ang = w.rng() * Math.PI * 2
+    const rad = minR + w.rng() * Math.max(1.5, maxR - minR)
+    const hit = tryPos(
+      w,
+      w.player.x + Math.cos(ang) * rad,
+      w.player.z + Math.sin(ang) * rad,
+      SPAWN_PLACE.safeR,
+      maxR + 2,
+    )
+    if (hit) return hit
   }
   const side = Math.floor(w.rng() * 4)
   if (side === 0) return { x: -half + w.rng() * half * 2, z: -half }
@@ -185,81 +158,105 @@ function pickSpawnPos(w: World): { x: number; z: number } {
   return { x: half, z: -half + w.rng() * half * 2 }
 }
 
+function pickTerrainCamp(w: World, minPlayer: number, maxPlayer: number): { x: number; z: number } | null {
+  if (!w.terrain.length) return null
+  const n = w.terrain.length
+  const start = (w.rng() * n) | 0
+  for (let i = 0; i < n; i++) {
+    const t = w.terrain[(start + i) % n]!
+    const jx = (w.rng() - 0.5) * t.w * 0.35
+    const jz = (w.rng() - 0.5) * t.d * 0.35
+    const hit = tryPos(w, t.x + jx, t.z + jz, minPlayer, maxPlayer)
+    if (hit) return hit
+  }
+  return null
+}
+
+function pickFieldCamp(w: World, minPlayer: number, maxPlayer: number): { x: number; z: number } {
+  const half = w.arena.half - 1.4
+  for (let i = 0; i < 32; i++) {
+    const hit = tryPos(
+      w,
+      (w.rng() * 2 - 1) * half,
+      (w.rng() * 2 - 1) * half,
+      minPlayer,
+      maxPlayer,
+    )
+    if (hit) return hit
+  }
+  return pickPressurePos(w)
+}
+
+/** 野外营地：场地散落，可贴天气地块，不贴脸。 */
+function pickWildCamp(w: World): { x: number; z: number } {
+  const half = w.arena.half - 1.4
+  const minP = SPAWN_PLACE.wildMin
+  const maxP = Math.max(minP + 4, half * SPAWN_PLACE.wildMaxFrac + 8)
+  if (w.rng() < SPAWN_PLACE.terrainBias) {
+    const onLand = pickTerrainCamp(w, minP, maxP)
+    if (onLand) return onLand
+  }
+  return pickFieldCamp(w, minP, maxP)
+}
+
+function pickSpawnPos(w: World): { x: number; z: number } {
+  return pickPressurePos(w)
+}
+
+function popEmerge(w: World, x: number, z: number): void {
+  w.fxPops.push({ x, z, kind: 'emerge', life: 0.38, maxLife: 0.38 })
+  if (w.fxPops.length > 28) w.fxPops.splice(0, w.fxPops.length - 28)
+}
+
 function specForKind(w: World, kind: EnemyKind): FodderSpec {
   const wave = w.stats.wave
-  const trash = (base: number, per: number) =>
-    scaleEnemySpeed(base + Math.max(0, wave - 1) * per, wave, 'trash')
-  const tank = (base: number, per: number) =>
-    scaleEnemySpeed(base + Math.max(0, wave - 1) * per, wave, 'tank')
-  switch (kind) {
-    case 'frost':
-      return {
-        kind,
-        hpMul: 1.35,
-        r: 0.3,
-        speed: trash(2.65, 0.12),
-        shootCd: Math.max(0.4, 0.75 - wave * 0.03) + w.rng() * 0.45,
-      }
-    case 'spitter':
-      return {
-        kind,
-        hpMul: 1.2,
-        r: 0.29,
-        speed: trash(2.85, 0.13),
-        shootCd: Math.max(0.35, 0.6 - wave * 0.035) + w.rng() * 0.4,
-      }
-    case 'leech':
-      return {
-        kind,
-        hpMul: 1.55,
-        r: 0.34,
-        speed: trash(4.45, 0.22),
-        shootCd: 99,
-      }
-    case 'brute':
-      // 高血高防：走慢、多抗一会，给玩家抽汁
-      return {
-        kind,
-        hpMul: 6.2,
-        r: 0.48,
-        speed: tank(1.55, 0.04),
-        shootCd: 0.35 + w.rng() * 0.7,
-      }
-    case 'shooter':
-      return {
-        kind,
-        hpMul: 0.85,
-        r: 0.28,
-        speed: trash(3.05, 0.16),
-        shootCd: Math.max(0.32, 0.55 - wave * 0.03) + w.rng() * 0.55,
-      }
-    default:
-      // 垃圾追击：脆、略快，清完就该补
-      return {
-        kind: 'chaser',
-        hpMul: 0.78,
-        r: 0.3,
-        speed: trash(4.25, 0.24),
-        shootCd: 0.35 + w.rng() * 0.7,
-      }
+  const key: SpawnFodderKind =
+    kind === 'frost' ||
+    kind === 'spitter' ||
+    kind === 'leech' ||
+    kind === 'brute' ||
+    kind === 'shooter'
+      ? kind
+      : 'chaser'
+  const rule = FODDER_KINDS[key]
+  const speed = scaleEnemySpeed(
+    rule.speedBase + Math.max(0, wave - 1) * rule.speedPerWave,
+    wave,
+    rule.role,
+  )
+  let shootCd: number
+  if (rule.shootCdFixed != null) {
+    shootCd = rule.shootCdFixed
+  } else if (rule.shootCdBase != null) {
+    shootCd =
+      Math.max(
+        rule.shootCdMin ?? 0,
+        rule.shootCdBase - wave * (rule.shootCdPerWave ?? 0),
+      ) +
+      w.rng() * (rule.shootCdJitter ?? 0)
+  } else {
+    shootCd =
+      (rule.shootCdIdleBase ?? 0.35) + w.rng() * (rule.shootCdIdleJitter ?? 0.7)
+  }
+  return {
+    kind: key,
+    hpMul: rule.hpMul,
+    r: rule.r,
+    speed,
+    shootCd,
   }
 }
 
 /** Gate status / heavy fodder by wave number even if the phase wants them. */
 function filterWeights(
   wave: number,
-  weights: Partial<Record<EnemyKind, number>>,
-): Array<{ kind: EnemyKind; w: number }> {
-  const out: Array<{ kind: EnemyKind; w: number }> = []
-  for (const [kind, wt] of Object.entries(weights) as [EnemyKind, number][]) {
+  weights: Partial<Record<SpawnFodderKind, number>>,
+): Array<{ kind: SpawnFodderKind; w: number }> {
+  const out: Array<{ kind: SpawnFodderKind; w: number }> = []
+  for (const [kind, wt] of Object.entries(weights) as [SpawnFodderKind, number][]) {
     if (wt <= 0) continue
-    if (kind === 'frost' || kind === 'spitter') {
-      if (wave < 2) continue
-    }
-    if (kind === 'leech' || kind === 'brute') {
-      if (wave < 3 && kind === 'leech') continue
-      if (wave < 2 && kind === 'brute') continue
-    }
+    const unlock = FODDER_UNLOCK_WAVE[kind]
+    if (unlock != null && wave < unlock) continue
     out.push({ kind, w: wt })
   }
   if (out.length === 0) out.push({ kind: 'chaser', w: 1 })
@@ -283,8 +280,12 @@ function countField(w: World): { trash: number; meat: number; fodder: number } {
 
 /** 重装/精英同时在场上限：少而肥，别把脆皮挤光。 */
 function meatCap(maxEnemies: number, wave: number): number {
-  const soft = Math.max(1, Math.floor(maxEnemies * 0.16))
-  return Math.min(wave >= 5 ? 3 : 2, soft)
+  const soft = Math.max(1, Math.floor(maxEnemies * SPAWN_DENSITY.meatCapFrac))
+  const hard =
+    wave >= SPAWN_DENSITY.meatCapWaveGate
+      ? SPAWN_DENSITY.meatCapMaxLate
+      : SPAWN_DENSITY.meatCapMaxEarly
+  return Math.min(hard, soft)
 }
 
 function rollFodder(
@@ -302,10 +303,10 @@ function rollFodder(
       kind: e.kind,
       w:
         e.kind === 'chaser' || e.kind === 'shooter'
-          ? e.w * 3.2
+          ? e.w * PREFER_TRASH_WEIGHT.chaser
           : e.kind === 'leech'
-            ? e.w * 1.4
-            : e.w * 0.7,
+            ? e.w * PREFER_TRASH_WEIGHT.leech
+            : e.w * PREFER_TRASH_WEIGHT.other,
     }))
   }
   let total = 0
@@ -323,29 +324,46 @@ function scaledHp(w: World, hp: number): number {
   return Math.max(1, Math.floor(hp * mul))
 }
 
-/** 每波一只可击碎宝箱；掉落三选一（属性 / 灌注）。 */
-export function spawnWaveChest(w: World): void {
-  if (w.enemies.some((e) => e.kind === 'chest')) return
-  const wave = w.stats.wave
+export function rollChestAtSec(waveDuration: number, rng: () => number): number {
+  const min = SPAWN_TIMING.chestProgressMin
+  const max = SPAWN_TIMING.chestProgressMax
+  const p = min + rng() * (max - min)
+  return Math.max(1, waveDuration * p)
+}
+
+function pickChestPos(w: World): { x: number; z: number } {
   const half = w.arena.half - 2.2
-  let x = 0
-  let z = 0
-  let ok = false
-  for (let i = 0; i < 24; i++) {
+  const minD = SPAWN_TIMING.chestMinPlayerDist
+  const rim0 = SPAWN_TIMING.chestRimMin
+  const rim1 = SPAWN_TIMING.chestRimMax
+  for (let i = 0; i < 36; i++) {
     const ang = w.rng() * Math.PI * 2
-    const rad = 6.5 + w.rng() * 5.5
-    x = clamp(Math.cos(ang) * rad, -half, half)
-    z = clamp(Math.sin(ang) * rad, -half, half)
-    if (Math.hypot(x - w.player.x, z - w.player.z) < 5) continue
+    const rad = half * (rim0 + w.rng() * (rim1 - rim0))
+    const x = clamp(Math.cos(ang) * rad, -half, half)
+    const z = clamp(Math.sin(ang) * rad, -half, half)
+    if (Math.hypot(x - w.player.x, z - w.player.z) < minD) continue
     if (hitsObstacle(x, z, 0.55, w.obstacles)) continue
-    ok = true
-    break
+    return { x, z }
   }
-  if (!ok) {
-    x = clamp(7.5 * (w.rng() < 0.5 ? 1 : -1), -half, half)
-    z = clamp(5.5 * (w.rng() < 0.5 ? 1 : -1), -half, half)
+  const away = Math.hypot(w.player.x, w.player.z) < 0.4
+    ? w.rng() * Math.PI * 2
+    : Math.atan2(w.player.z, w.player.x) + Math.PI
+  return {
+    x: clamp(Math.cos(away) * half * rim1, -half, half),
+    z: clamp(Math.sin(away) * half * rim1, -half, half),
   }
-  const hp = scaledHp(w, Math.floor(fodderHp(wave) * (3.8 + wave * 0.25)))
+}
+
+/** 每波一只可击碎宝箱；曲中段才出现，远处要找。一口碎。 */
+export function spawnWaveChest(w: World): void {
+  if (w.chestSpawned || w.enemies.some((e) => e.kind === 'chest')) {
+    w.chestSpawned = true
+    return
+  }
+  const wave = w.stats.wave
+  const { x, z } = pickChestPos(w)
+  const meta = makeEnemyMeta('chest')
+  const hp = SPECIAL_HP.chestHp
   w.enemies.push({
     x,
     z,
@@ -355,54 +373,74 @@ export function spawnWaveChest(w: World): void {
     speed: 0,
     shootCd: 99,
     kind: 'chest',
-    ...idleCombat('chest', wave),
+    meta,
+    ...idleCombat('chest', wave, meta.armor),
     ...aiDefaults(w.rng),
     aiCd: 99,
   })
+  w.chestSpawned = true
+}
+
+function maybeSpawnChest(w: World): void {
+  if (w.chestSpawned || w.cleared || w.dead) return
+  if (w.waveTime < w.chestAtSec) return
+  spawnWaveChest(w)
 }
 
 function spawnEnemy(
   w: World,
   phase: PhaseCfg,
+  pos: { x: number; z: number },
   opts?: { preferTrash?: boolean; meatFull?: boolean },
 ): void {
-  const { x, z } = pickSpawnPos(w)
+  const { x, z } = pos
   const wave = w.stats.wave
   const spec = rollFodder(w, phase, opts)
-  const hp = scaledHp(w, Math.floor(fodderHp(wave) * spec.hpMul))
+  const meta = makeEnemyMeta(spec.kind)
+  const hpMul = meta.fodder?.hpMul ?? spec.hpMul
+  const hp = scaledHp(w, Math.floor(fodderHp(wave) * hpMul))
   w.enemies.push({
     x,
     z,
     hp,
     maxHp: hp,
-    r: spec.r,
+    r: meta.fodder?.r ?? spec.r,
     speed: spec.speed,
     shootCd: spec.shootCd,
     kind: spec.kind,
-    ...idleCombat(spec.kind, wave),
+    meta,
+    ...idleCombat(spec.kind, wave, meta.armor),
     ...aiDefaults(w.rng),
+    hurtFlash: 0.42,
   })
+  popEmerge(w, x, z)
 }
 
 /** Arm yellow-ring warn; elite entity appears when tele hits 0. */
 function armElite(w: World): void {
-  const { x, z } = pickSpawnPos(w)
+  const { x, z } = pickWildCamp(w)
   w.eliteTeleX = x
   w.eliteTeleZ = z
   w.eliteTeleMax = 1.6
   w.eliteTeleT = 1.6
   w.elitePending = true
-  if (w.bossHintT <= 0.4) {
-    w.bossHint = '精英出现'
-    w.bossHintT = 1.6
-  }
+  pushHint(w, 'elite', '精英出现')
 }
 
 function commitElite(w: World): void {
   const x = w.eliteTeleX
   const z = w.eliteTeleZ
   const wave = w.stats.wave
-  const hp = scaledHp(w, Math.floor(fodderHp(wave) * (wave <= 1 ? 7.5 : 9 + wave * 0.55)))
+  const hp = scaledHp(
+    w,
+    Math.floor(
+      fodderHp(wave) *
+        (wave <= 1
+          ? SPECIAL_HP.eliteMulWave1
+          : SPECIAL_HP.eliteMulBase + wave * SPECIAL_HP.eliteMulPerWave),
+    ),
+  )
+  const meta = makeEnemyMeta('elite')
   w.enemies.push({
     x,
     z,
@@ -412,33 +450,39 @@ function commitElite(w: World): void {
     speed: scaleEnemySpeed(2.15 + Math.max(0, wave - 1) * 0.06, wave, 'tank'),
     shootCd: Math.max(0.35, 0.6 - wave * 0.03),
     kind: 'elite',
-    ...idleCombat('elite', wave),
+    meta,
+    ...idleCombat('elite', wave, meta.armor),
     ...aiDefaults(w.rng),
     hurtFlash: 0.7,
   })
   w.elitePending = false
   w.eliteTeleT = 0
   w.eliteTeleMax = 0
+  w.eliteSpawned = true
+  popEmerge(w, x, z)
 }
 
 function spawnBoss(w: World): void {
   const { x, z } = pickSpawnPos(w)
   const wave = w.stats.wave
   const def = bossDefForWave(wave)
-  const hp = scaledHp(w, Math.floor(fodderHp(wave) * bossHpMul(wave, def.hpMul)))
+  const meta = makeEnemyMeta('boss', def)
+  const boss = meta.boss ?? def
+  const hp = scaledHp(w, Math.floor(fodderHp(wave) * bossHpMul(wave, boss.hpMul)))
   w.enemies.push({
     x,
     z,
     hp,
     maxHp: hp,
-    r: def.r,
-    speed: scaleEnemySpeed(def.speed + Math.max(0, wave - 1) * 0.05, wave, 'boss'),
-    shootCd: Math.max(0.55, def.shootCd0 - wave * 0.04),
+    r: boss.r,
+    speed: scaleEnemySpeed(boss.speed + Math.max(0, wave - 1) * 0.05, wave, 'boss'),
+    shootCd: Math.max(0.55, boss.shootCd0 - wave * 0.04),
     kind: 'boss',
-    bossId: def.id,
-    ...idleCombat('boss', wave),
+    meta,
+    bossId: boss.id,
+    ...idleCombat('boss', wave, meta.armor),
     ...aiDefaults(w.rng),
-    aiCd: def.id === 'warden' ? 2.5 : def.id === 'caller' ? 3 : 2,
+    aiCd: boss.id === 'warden' ? 2.5 : boss.id === 'caller' ? 3 : 2,
   })
   const intro: Record<string, string> = {
     warden: '节拍监守 · 躲开脉冲环',
@@ -447,8 +491,7 @@ function spawnBoss(w: World): void {
     choir: '铁律合唱 · 读攻击窗',
     tyrant: '终曲暴君 · 半血会变相',
   }
-  w.bossHint = intro[def.id] ?? def.name
-  w.bossHintT = 2.4
+  pushHint(w, 'boss', intro[boss.id] ?? boss.name)
 }
 
 function foeBullet(
@@ -464,11 +507,12 @@ function foeBullet(
     z,
     vx,
     vz,
-    life: opts.life ?? 2.6,
+    life: opts.life ?? FOE_SHOT.life,
     damage: 1,
     pierce: 0,
     friendly: false,
-    r: opts.r ?? 0.2,
+    r: opts.r ?? FOE_SHOT.r,
+    meta: makeFoeBulletMeta('foe'),
     hit: new Set(),
     hitFx: opts.hitFx,
     dmgMul: opts.dmgMul,
@@ -478,6 +522,7 @@ function foeBullet(
 export function tickEnemies(w: World, dt: number, clock: AudioClockPort): void {
   const wave = w.stats.wave
   w.spawnCd -= dt
+  maybeSpawnChest(w)
   const bossAlive = w.enemies.some((e) => e.kind === 'boss' && e.hp > 0)
   const phase = spawnPhaseAt(w, bossAlive)
   const progress = songProgress(w)
@@ -485,19 +530,19 @@ export function tickEnemies(w: World, dt: number, clock: AudioClockPort): void {
   const stillSpawning =
     w.lootGraceT <= 0 &&
     w.waveTime >= SPAWN_OPEN_SEC &&
-    (w.waveTime < w.waveDuration - 0.8 || bossAlive)
+    (w.waveTime < w.waveDuration - SPAWN_TIMING.endPadSec || bossAlive)
 
   const maxEnemies = Math.floor(
     (phase.maxBase + wave * phase.maxPerWave) * (w.runMeta?.hordeCapMul ?? 1),
   )
-  const baseRate = Math.max(0.1, 0.42 - wave * 0.035)
+  const baseRate = Math.max(SPAWN_RATE.min, SPAWN_RATE.base - wave * SPAWN_RATE.perWave)
   const fodderRate = baseRate * phase.rateMul * (w.runMeta?.hordeRateMul ?? 1)
 
   // 场上密度：维持脆皮为主；肉盾有软顶，补刷优先追击/射手
   const { trash, meat, fodder: fodderAlive } = countField(w)
-  const softTarget = Math.max(4, Math.floor(maxEnemies * 0.52))
-  const trashTarget = Math.max(3, Math.floor(maxEnemies * 0.4))
-  const criticalFloor = Math.max(2, Math.floor(maxEnemies * 0.24))
+  const softTarget = Math.max(4, Math.floor(maxEnemies * SPAWN_DENSITY.softTargetFrac))
+  const trashTarget = Math.max(3, Math.floor(maxEnemies * SPAWN_DENSITY.trashTargetFrac))
+  const criticalFloor = Math.max(2, Math.floor(maxEnemies * SPAWN_DENSITY.criticalFloorFrac))
   const meatLimit = meatCap(maxEnemies, wave)
 
   if (stillSpawning && w.spawnCd <= 0 && fodderAlive < maxEnemies) {
@@ -516,15 +561,41 @@ export function tickEnemies(w: World, dt: number, clock: AudioClockPort): void {
     if (wave >= 4 && phase.id === 'pressure' && depleted && trashThin) pack += 1
     const n = Math.min(pack, room)
     const preferTrash = emptyField || criticallyLow || trashThin || meatFull
+    const starve = emptyField || criticallyLow
+    const camp = starve ? pickPressurePos(w) : pickWildCamp(w)
+    const maxPlayer = w.arena.half * 1.6
     for (let i = 0; i < n; i++) {
-      spawnEnemy(w, phase, { preferTrash, meatFull })
+      let pos = camp
+      if (starve) {
+        pos = pickPressurePos(w)
+      } else if (i > 0) {
+        pos =
+          pickAround(
+            w,
+            camp.x,
+            camp.z,
+            SPAWN_PLACE.campJitter,
+            SPAWN_PLACE.safeR,
+            maxPlayer,
+          ) ??
+          pickAround(
+            w,
+            camp.x,
+            camp.z,
+            SPAWN_PLACE.campJitter * 1.8,
+            SPAWN_PLACE.safeR,
+            maxPlayer,
+          ) ??
+          pickWildCamp(w)
+      }
+      spawnEnemy(w, phase, pos, { preferTrash, meatFull })
     }
     w.spawnCd = emptyField
-      ? fodderRate * 0.28
+      ? fodderRate * SPAWN_RATE.emptyMul
       : criticallyLow || trashThin
-        ? fodderRate * 0.42
+        ? fodderRate * SPAWN_RATE.criticalMul
         : depleted
-          ? fodderRate * 0.62
+          ? fodderRate * SPAWN_RATE.depletedMul
           : fodderRate
   }
 
@@ -533,22 +604,27 @@ export function tickEnemies(w: World, dt: number, clock: AudioClockPort): void {
     commitElite(w)
     clock.beep('elite_spawn')
   }
-  if (
-    phase.elite &&
+  const bossAt = bossAtSec(w)
+  const eliteAlive = w.enemies.some((e) => e.kind === 'elite')
+  const canArmElite =
     !bossAlive &&
     stillSpawning &&
-    progress >= 0.28 &&
-    w.waveTime >= ELITE_FIRST_SEC &&
-    w.eliteCd <= 0 &&
     !w.elitePending &&
-    !w.enemies.some((e) => e.kind === 'elite')
-  ) {
+    !eliteAlive &&
+    w.waveTime >= ELITE_FIRST_SEC
+  const phaseWantsElite =
+    phase.elite &&
+    progress >= SPAWN_TIMING.eliteProgressMin &&
+    w.eliteCd <= 0
+  const mustBeforeBoss =
+    !w.eliteSpawned && w.waveTime >= bossAt - SPAWN_TIMING.eliteBeforeBossSec
+  if (canArmElite && (phaseWantsElite || mustBeforeBoss)) {
     armElite(w)
     w.eliteCd = phase.eliteEvery
   }
 
   // Boss：偏曲中后段；早期波还要等级门槛，避免零强化裸打。
-  const bossAt = Math.min(BOSS_AT_SEC, Math.max(BOSS_EARLIEST_SEC, w.waveDuration * 0.55))
+  // 首只精英落地（或预告中）后再放 Boss，避免 3 分钟曲把精英窗挤掉。
   const bossLevelOk =
     w.stats.wave >= 3 ||
     w.stats.level >= BOSS_MIN_LEVEL_EARLY ||
@@ -558,17 +634,19 @@ export function tickEnemies(w: World, dt: number, clock: AudioClockPort): void {
     bossLevelOk &&
     w.waveTime >= bossAt &&
     w.waveTime < w.waveDuration &&
-    !w.enemies.some((e) => e.kind === 'boss')
+    !w.enemies.some((e) => e.kind === 'boss') &&
+    (w.eliteSpawned || w.elitePending || w.waveTime >= bossAt + SPAWN_TIMING.eliteBeforeBossSec + 2)
   ) {
     spawnBoss(w)
     w.bossSpawned = true
     clock.beep('boss_spawn')
   }
 
-  const shotSpd = 7 + wave * 0.35
+  const shotSpd = FOE_SHOT.spdBase + wave * FOE_SHOT.spdPerWave
   tickEnemyStatuses(w, dt)
   for (const e of w.enemies) {
     e.hurtFlash = Math.max(0, e.hurtFlash - dt)
+    tickEnemyKnock(w, e, dt)
     if (isFrozen(e)) continue
     if (tickBoss(w, e, dt, clock)) {
       displaceEnemyGround(w, e, dt)
@@ -592,29 +670,30 @@ export function tickEnemies(w: World, dt: number, clock: AudioClockPort): void {
       const dmgMul = outgoingMul(e)
       if (e.kind === 'frost') {
         foeBullet(w, e.x, e.z, d.x * shotSpd * 0.85, d.z * shotSpd * 0.85, {
-          r: 0.24,
-          life: 3.0,
+          r: FOE_SHOT.frostR,
+          life: FOE_SHOT.frostLife,
           hitFx,
           dmgMul,
         })
-        e.shootCd = 1.05 + w.rng() * 0.35
+        e.shootCd = FOE_SHOT.frostCdBase + w.rng() * FOE_SHOT.frostCdJitter
       } else if (e.kind === 'spitter') {
-        for (const t of [-0.18, 0.18]) {
+        for (const t of [-0.14, 0.14]) {
           const c = Math.cos(t)
           const si = Math.sin(t)
           const dx = d.x * c - d.z * si
           const dz = d.x * si + d.z * c
           foeBullet(w, e.x, e.z, dx * shotSpd * 0.8, dz * shotSpd * 0.8, {
-            r: 0.22,
-            life: 2.8,
+            r: FOE_SHOT.spitterR,
+            life: FOE_SHOT.spitterLife,
             hitFx,
             dmgMul,
           })
         }
-        e.shootCd = 0.95 + w.rng() * 0.4
+        e.shootCd = FOE_SHOT.spitterCdBase + w.rng() * FOE_SHOT.spitterCdJitter
       } else {
-        const shots = e.kind === 'elite' ? 3 : wave >= 4 ? 2 : 1
-        const spread = e.kind === 'elite' ? 0.38 : 0.22
+        const shots =
+          e.kind === 'elite' ? 3 : wave >= FOE_SHOT.shooterDoubleFromWave ? 2 : 1
+        const spread = e.kind === 'elite' ? 0.32 : FOE_SHOT.shooterSpread
         for (let s = 0; s < shots; s++) {
           const t = shots === 1 ? 0 : (s / (shots - 1) - 0.5) * spread
           const c = Math.cos(t)
@@ -622,12 +701,19 @@ export function tickEnemies(w: World, dt: number, clock: AudioClockPort): void {
           const dx = d.x * c - d.z * si
           const dz = d.x * si + d.z * c
           foeBullet(w, e.x, e.z, dx * shotSpd, dz * shotSpd, {
+            r: FOE_SHOT.r,
+            life: FOE_SHOT.life,
             hitFx: e.kind === 'elite' ? hitFx : undefined,
             dmgMul,
           })
         }
         e.shootCd =
-          e.kind === 'elite' ? 0.7 + w.rng() * 0.35 : Math.max(0.4, 1.2 - wave * 0.12)
+          e.kind === 'elite'
+            ? 0.85 + w.rng() * 0.35
+            : Math.max(
+                FOE_SHOT.shooterCdMin,
+                FOE_SHOT.shooterCdBase - wave * FOE_SHOT.shooterCdPerWave,
+              )
       }
     }
   }
@@ -637,7 +723,7 @@ export function tickEnemies(w: World, dt: number, clock: AudioClockPort): void {
 function tickFodderMove(w: World, e: Enemy, dt: number): void {
   if (e.kind === 'chest') return
   const lim = w.arena.half - e.r
-  const speedMul = enemyMoveMul(e) * groundMoveMul(w, e.x, e.z)
+  const speedMul = enemyMoveMul(e) * groundMoveMul(w, e.x, e.z) * (e.knockT > 0 ? 0.4 : 1)
   const toP = norm(w.player.x - e.x, w.player.z - e.z)
   const dist = Math.hypot(w.player.x - e.x, w.player.z - e.z)
 
@@ -667,10 +753,10 @@ function tickFodderMove(w: World, e: Enemy, dt: number): void {
     case 'chaser': {
       // 贴脸冲：间歇短突进
       if (e.aiCd <= 0 && dist < 9 && dist > 2.2) {
-        const boost = 2.4 + w.rng() * 0.6
+        const boost = FOE_SHOT.chaserDashBoost
         e.dashVx = toP.x * e.speed * boost
         e.dashVz = toP.z * e.speed * boost
-        e.dashT = 0.22
+        e.dashT = FOE_SHOT.chaserDashT
         e.aiCd = 1.6 + w.rng() * 1.1
         e.aiPhase = 1
         return
@@ -685,8 +771,8 @@ function tickFodderMove(w: World, e: Enemy, dt: number): void {
     case 'leech': {
       if (e.aiCd <= 0) {
         const side = w.rng() < 0.5 ? 1 : -1
-        e.dashVx = (toP.x * 0.7 + -toP.z * side * 0.7) * e.speed * 2.8
-        e.dashVz = (toP.z * 0.7 + toP.x * side * 0.7) * e.speed * 2.8
+        e.dashVx = (toP.x * 0.7 + -toP.z * side * 0.7) * e.speed * FOE_SHOT.leechDashMul
+        e.dashVz = (toP.z * 0.7 + toP.x * side * 0.7) * e.speed * FOE_SHOT.leechDashMul
         e.dashT = 0.28
         e.aiCd = 1.1 + w.rng() * 0.8
         return

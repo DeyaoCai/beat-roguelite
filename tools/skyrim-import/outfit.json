@@ -2,7 +2,7 @@
   "gameData": "E:/SteamLibrary/steamapps/common/Skyrim Special Edition/Data",
   "mo2Mods": "C:/Users/Admin/AppData/Local/ModOrganizer/Skyrim Special Edition/mods",
   "body": "CBBE 3BA/meshes/actors/character/character assets/femalebody_1.nif",
-  "head": "public/figures/skyrim-female/models/ori/femalehead.nif",
+  "head": "../co_der-resource/beat-roguelite/figures/skyrim-female/models/ori/femalehead.nif",
   "hands": "CBBE 3BA/meshes/actors/character/character assets/femalehands_1.nif",
   "feet": "CBBE 3BA/meshes/actors/character/character assets/femalefeet_1.nif",
   "clothes": [],
@@ -13,5 +13,5 @@
     "walk": "tools/skyrim-import/.cache/mt_walkforward.hkx",
     "cast": "tools/skyrim-import/.cache/mrh_release.hkx"
   },
-  "out": "public/figures/skyrim-female/models/body.glb"
+  "out": "../co_der-resource/beat-roguelite/figures/skyrim-female/models/body.glb"
 }

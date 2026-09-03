@@ -52,6 +52,25 @@ export function inCone(
   return ang <= halfAngle
 }
 
+/** Distance from point to segment AB on XZ. */
+export function distToSegment(
+  px: number,
+  pz: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): number {
+  const abx = bx - ax
+  const abz = bz - az
+  const apx = px - ax
+  const apz = pz - az
+  const ab2 = abx * abx + abz * abz
+  if (ab2 < 1e-8) return Math.hypot(apx, apz)
+  const t = clamp((apx * abx + apz * abz) / ab2, 0, 1)
+  return Math.hypot(px - (ax + t * abx), pz - (az + t * abz))
+}
+
 export function mulberry32(seed: number): () => number {
   let t = seed >>> 0
   return () => {

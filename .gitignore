@@ -25,10 +25,12 @@ tools/skyrim-import/**/__pycache__/
 tools/skyrim-import/fuz2wav/bin/
 tools/skyrim-import/fuz2wav/obj/
 
-# Local imported figure assets (pnpm import:tka / import:skyrim)
-public/figures/**/models/
-public/figures/**/voices/
-public/osz/
+# Figure packs live in co_der-resource; only active.json stays in game repo
+public/figures/**/*
+!public/figures/
+!public/figures/active.json
+
+# osz / audio charts live in co_der-resource/beat-roguelite/
 
 *.dll
 *.exe

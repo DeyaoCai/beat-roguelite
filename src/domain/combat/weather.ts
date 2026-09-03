@@ -1,8 +1,11 @@
 import {
   weatherById,
+  WEATHERS,
   type DmgTag,
   type WeatherId,
 } from '../../content/weather'
+import { ARENA_RULES, WEATHER_CYCLE } from '../../content/rules'
+import { pushHint } from './hints'
 import type { AudioClockPort } from '../shared/ports'
 import { mulberry32 } from './math'
 import { moveWithObstacles } from './map'
@@ -23,7 +26,6 @@ const TAG_OF: Partial<Record<DamageKind, DmgTag>> = {
   aura: 'ice',
   chain: 'thunder',
   star: 'earth',
-  orbit: 'metal',
 }
 
 const WIND_SPD = 2.35
@@ -177,18 +179,40 @@ function growBlob(
   return cells
 }
 
-export function pickWeather(seed: number, wave: number): WeatherId {
+export function weatherSlotCount(durationSec: number): number {
+  const n = Math.round(durationSec / WEATHER_CYCLE.minSlotSec)
+  return Math.max(WEATHER_CYCLE.minSlots, Math.min(WEATHER_CYCLE.maxSlots, n))
+}
+
+export function weatherSlotAt(waveTime: number, waveDuration: number, slots: number): number {
+  if (slots <= 1 || waveDuration <= 0) return 0
+  const p = Math.max(0, Math.min(0.999, waveTime / waveDuration))
+  return Math.min(slots - 1, Math.floor(p * slots))
+}
+
+/** 一波洗一次：洗全表再切前 N 段，相邻不重复。 */
+export function rollWeatherCycle(
+  seed: number,
+  wave: number,
+  durationSec = ARENA_RULES.waveDurationFallbackSec,
+): WeatherId[] {
+  const ids = WEATHERS.map((w) => w.id)
   const rng = mulberry32((seed + wave * 7919 + 13) >>> 0)
-  const ids: WeatherId[] = [
-    'clear',
-    'heat',
-    'rain',
-    'gale',
-    'frost',
-    'dust',
-    'magnet',
-  ]
-  return ids[Math.floor(rng() * ids.length)] ?? 'clear'
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = (rng() * (i + 1)) | 0
+    const a = ids[i]!
+    ids[i] = ids[j]!
+    ids[j] = a
+  }
+  return ids.slice(0, weatherSlotCount(durationSec))
+}
+
+export function pickWeather(
+  seed: number,
+  wave: number,
+  durationSec?: number,
+): WeatherId {
+  return rollWeatherCycle(seed, wave, durationSec)[0] ?? 'clear'
 }
 
 export function weatherDamageMul(id: WeatherId, kind: DamageKind): number {
@@ -201,9 +225,10 @@ export function generateField(
   seed: number,
   wave: number,
   arenaHalf: number,
+  weatherId: WeatherId,
+  slot = 0,
 ): { weatherId: WeatherId; windX: number; windZ: number; terrain: TerrainPatch[] } {
-  const weatherId = pickWeather(seed, wave)
-  const rng = mulberry32((seed + wave * 7919 + 97) >>> 0)
+  const rng = mulberry32((seed + wave * 7919 + slot * 10007 + 97) >>> 0)
   const ang = rng() * Math.PI * 2
   const def = weatherById(weatherId)
   const cell = TERRAIN_CELL
@@ -234,6 +259,25 @@ export function generateField(
     windZ: Math.sin(ang),
     terrain,
   }
+}
+
+export function applyWeatherSlot(w: World, slot: number): void {
+  const id = w.weatherCycle[slot]
+  if (!id) return
+  const field = generateField(w.fieldSeed, w.stats.wave, w.arena.half, id, slot)
+  w.weatherId = field.weatherId
+  w.windX = field.windX
+  w.windZ = field.windZ
+  w.terrain = field.terrain
+  w.weatherSlot = slot
+}
+
+export function tickWeatherCycle(w: World): void {
+  const n = w.weatherCycle.length
+  const slot = weatherSlotAt(w.waveTime, w.waveDuration, n)
+  if (slot === w.weatherSlot) return
+  applyWeatherSlot(w, slot)
+  pushHint(w, 'weather', `天气 · ${weatherById(w.weatherId).name}`)
 }
 
 export function sampleGround(w: World, x: number, z: number): GroundFlags {

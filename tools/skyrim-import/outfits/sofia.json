@@ -1,0 +1,27 @@
+{
+  "id": "skyrim-female",
+  "caption": "Sofia",
+  "voices": "voices/voices.json",
+  "gameData": "E:/SteamLibrary/steamapps/common/Skyrim Special Edition/Data",
+  "mo2Mods": "C:/Users/Admin/AppData/Local/ModOrganizer/Skyrim Special Edition/mods",
+  "modRoot": "tools/skyrim-import/.cache/mod-src/sofia/Data",
+  "body": "meshes/actors/character/sofia/femalebody_1.nif",
+  "head": "meshes/actors/character/facegendata/facegeom/sofiafollower.esp/000012c4.nif",
+  "headTint": "textures/actors/character/facegendata/facetint/sofiafollower.esp/000012c4.dds",
+  "headDiffuse": "textures/actors/character/sofia/femalehead.dds",
+  "hands": "meshes/actors/character/sofia/femalehands_1.nif",
+  "feet": "meshes/actors/character/sofia/femalefeet_1.nif",
+  "clothes": [
+    "meshes/actors/character/sofia/hair/hair04.nif",
+    "meshes/actors/character/sofia/hair/hairline04.nif",
+    "meshes/actors/character/sofia/eyesfemale.nif"
+  ],
+  "skeletonNif": "XP32 Maximum Skeleton Special Extended/meshes/actors/character/character assets female/skeleton_female.nif",
+  "skeletonHkx": "tools/skyrim-import/.cache/skeleton_female.hkx",
+  "gaits": {
+    "idle": "tools/skyrim-import/.cache/mt_idle.hkx",
+    "walk": "tools/skyrim-import/.cache/mt_walkforward.hkx",
+    "cast": "tools/skyrim-import/.cache/mrh_release.hkx"
+  },
+  "out": "../co_der-resource/beat-roguelite/figures/skyrim-female/models/body.glb"
+}

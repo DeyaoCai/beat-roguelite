@@ -1,15 +1,24 @@
-/** XP / level curve (run-scoped). */
+import { XP_CURVE } from '../../content/rules'
+
+/** XP / level curve (run-scoped). Coeffs in content/rules/progressionCurve. */
 
 export function xpToNextFor(level: number): number {
-  // 前几级快一点，保证 Boss 前能吃到 1～2 次三选一。
-  return 28 + Math.max(0, level - 1) * 18
+  const c = XP_CURVE
+  return c.toNextBase + Math.max(0, level - 1) * c.toNextPerLevel
 }
 
 export function xpForKill(mult: number, wave: number): number {
-  // 波 1 小怪约 10 XP；约 3 杀升一级。
-  return Math.max(1, Math.floor((8 + wave * 2) * (0.9 + 0.1 * Math.max(1, mult))))
+  const c = XP_CURVE
+  return Math.max(
+    1,
+    Math.floor(
+      (c.killBase + wave * c.killPerWave) *
+        (c.killMultBase + c.killMultPerHeat * Math.max(1, mult)),
+    ),
+  )
 }
 
 export function xpForHit(mult: number): number {
-  return Math.max(0, Math.floor(1 * Math.max(1, mult * 0.5)))
+  const c = XP_CURVE
+  return Math.max(0, Math.floor(1 * Math.max(1, mult * c.hitMultFactor)))
 }

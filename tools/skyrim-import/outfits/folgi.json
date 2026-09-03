@@ -1,0 +1,22 @@
+{
+  "id": "skyrim-folgi",
+  "caption": "Folgi",
+  "gameData": "E:/SteamLibrary/steamapps/common/Skyrim Special Edition/Data",
+  "mo2Mods": "C:/Users/Admin/AppData/Local/ModOrganizer/Skyrim Special Edition/mods",
+  "modRoot": "tools/skyrim-import/.cache/mod-src/folgi",
+  "body": "CBBE 3BA/meshes/actors/character/character assets/femalebody_1.nif",
+  "head": "meshes/Actors/Character/FaceGenData/FaceGeom/Follower Folgi Lightbringer.esp/00000800.NIF",
+  "headTint": "Textures/Actors/Character/FaceGenData/FaceTint/Follower Folgi Lightbringer.esp/00000800.dds",
+  "headDiffuse": "tools/skyrim-import/.cache/femalehead.png",
+  "hands": "CBBE 3BA/meshes/actors/character/character assets/femalehands_1.nif",
+  "feet": "CBBE 3BA/meshes/actors/character/character assets/femalefeet_1.nif",
+  "clothes": [],
+  "skeletonNif": "XP32 Maximum Skeleton Special Extended/meshes/actors/character/character assets female/skeleton_female.nif",
+  "skeletonHkx": "tools/skyrim-import/.cache/skeleton_female.hkx",
+  "gaits": {
+    "idle": "tools/skyrim-import/.cache/mt_idle.hkx",
+    "walk": "tools/skyrim-import/.cache/mt_walkforward.hkx",
+    "cast": "tools/skyrim-import/.cache/mrh_release.hkx"
+  },
+  "out": "../co_der-resource/beat-roguelite/figures/skyrim-folgi/models/body.glb"
+}

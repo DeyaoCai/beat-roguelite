@@ -1,16 +1,20 @@
+import { DROP_RULES, XP_CURVE } from '../../content/rules'
 import type { AudioClockPort } from '../shared/ports'
 import { pushEvent } from '../shared/events'
 import type { Enemy, GroundPickup, World } from '../combat/types'
 import { greedGoldMul } from './relics'
 import { xpForKill, xpToNextFor } from './xp'
 import { pickThree, type PickMode } from './upgrades'
+import { makePickupMeta } from './pickupMeta'
+
+const D = DROP_RULES
 
 /** Walk-over radius beyond the player collider. */
-export const PICKUP_REACH = 1.45
+export const PICKUP_REACH = D.pickupReach
 /** Gold / XP magnet pull speed (units/sec toward player). */
-export const MAGNET_PULL = 11
+export const MAGNET_PULL = D.magnetPull
 /** Relics use a shorter magnet than gold. */
-export const RELIC_MAGNET_MUL = 0.55
+export const RELIC_MAGNET_MUL = D.relicMagnetMul
 
 /** Add XP and queue level-ups (does not open UI). */
 export function grantXp(w: World, amount: number): void {
@@ -50,18 +54,25 @@ export function spawnPickup(
   kind: GroundPickup['kind'],
   amount = 0,
 ): void {
+  const meta = makePickupMeta(kind)
   w.pickups.push({
     id: w.nextPickupId++,
     x,
     z,
     kind,
+    meta,
     amount,
-    life: kind === 'xp' ? 42 : 28,
+    life: meta.life,
   })
 }
 
 function xpAmountForKill(w: World, e: Enemy): number {
-  const xpMul = e.kind === 'boss' ? 5 : e.kind === 'elite' ? 2.5 : 1
+  const xpMul =
+    e.kind === 'boss'
+      ? XP_CURVE.bossXpMul
+      : e.kind === 'elite'
+        ? XP_CURVE.eliteXpMul
+        : 1
   return Math.max(1, Math.floor(xpForKill(w.stats.mult, w.stats.wave) * xpMul))
 }
 
@@ -116,24 +127,24 @@ export function applyEnemyDefeatedRewards(w: World, e: Enemy): void {
   })
 
   if (e.kind === 'chest') {
-    spawnPickup(w, e.x, e.z, 'gold', 3 + w.stats.wave)
+    spawnPickup(w, e.x, e.z, 'gold', D.chestGoldBase + w.stats.wave * D.chestGoldPerWave)
     if (w.offer) {
       w.offerQueue.push({ mode: 'chest', reason: 'chest' })
     } else {
       openOffer(w, 'chest', 'chest')
     }
-    w.lootGraceT = Math.max(w.lootGraceT, 2.5)
+    w.lootGraceT = Math.max(w.lootGraceT, D.chestLootGrace)
     return
   }
 
   spawnXpOrb(w, e)
 
   if (e.kind === 'boss') {
-    spawnPickup(w, e.x, e.z, 'gold', 28 + w.stats.wave * 6)
+    spawnPickup(w, e.x, e.z, 'gold', D.bossGoldBase + w.stats.wave * D.bossGoldPerWave)
     spawnPickup(w, e.x + 0.6, e.z - 0.3, 'relic_major')
-    w.lootGraceT = Math.max(w.lootGraceT, 8)
+    w.lootGraceT = Math.max(w.lootGraceT, D.bossLootGrace)
     const relic = w.pickups[w.pickups.length - 1]
-    if (relic) relic.life = Math.max(relic.life, 16)
+    if (relic) relic.life = Math.max(relic.life, D.relicLifePad)
     // 清场保留未开宝箱
     w.enemies = w.enemies.filter((x) => x.kind === 'chest' && x.hp > 0)
     w.bullets = w.bullets.filter((b) => b.friendly)
@@ -142,12 +153,19 @@ export function applyEnemyDefeatedRewards(w: World, e: Enemy): void {
     return
   }
   if (e.kind === 'elite') {
-    spawnPickup(w, e.x - 0.45, e.z, 'gold', 10 + w.stats.wave * 2)
-    spawnPickup(w, e.x + 0.45, e.z, 'relic_minor')
-    w.lootGraceT = Math.max(w.lootGraceT, 5)
+    spawnPickup(w, e.x - 0.45, e.z, 'gold', D.eliteGoldBase + w.stats.wave * D.eliteGoldPerWave)
+    if (w.offer) {
+      w.offerQueue.push({ mode: 'drop_minor', reason: 'drop_minor' })
+    } else {
+      openOffer(w, 'drop_minor', 'drop_minor')
+    }
+    w.lootGraceT = Math.max(w.lootGraceT, D.eliteLootGrace)
     return
   }
-  const goldAmt = 1 + (w.rng() < 0.35 ? 1 : 0) + (e.kind === 'brute' ? 1 : 0)
+  const goldAmt =
+    D.trashGoldBase +
+    (w.rng() < D.trashGoldBonusChance ? 1 : 0) +
+    (e.kind === 'brute' ? D.trashBruteBonus : 0)
   spawnPickup(w, e.x, e.z, 'gold', goldAmt)
 }
 
@@ -162,6 +180,8 @@ export function openOffer(
   w.offer = pickThree(w.rng, w.upgrades, mode, w.loadout.starterId, {
     preferRhythm: w.runMode === 'endless',
     level: w.stats.level,
+    muteBeat: w.loadout.muteBeat,
+    autoPickup: w.loadout.autoPickup,
   })
   w.pickReason = reason
 }
@@ -197,18 +217,18 @@ function enqueueOrOpenRelic(
 
 /** Magnet pull + walk-over gold / XP / relics. */
 export function tickPickups(w: World, dt: number, clock?: AudioClockPort): void {
-  const magnetR = w.loadout.magnetR
+  const auto = w.loadout.autoPickup
+  const magnetR = auto ? Math.max(w.arena.half * 3, w.loadout.magnetR) : w.loadout.magnetR
   const pr = w.player.r + PICKUP_REACH
+  const pullMul = auto ? D.autoPullMul : 1
   for (const p of w.pickups) {
     p.life -= dt
     const dx = w.player.x - p.x
     const dz = w.player.z - p.z
     const dist = Math.hypot(dx, dz)
-    const reach =
-      p.kind === 'gold' || p.kind === 'xp' ? magnetR : magnetR * RELIC_MAGNET_MUL
+    const reach = auto ? magnetR : magnetR * p.meta.magnetMul
     if (dist > 0.05 && dist < reach) {
-      const pull =
-        MAGNET_PULL * (p.kind === 'gold' || p.kind === 'xp' ? 1 : 0.75) * dt
+      const pull = MAGNET_PULL * (auto ? 1 : p.meta.pullMul) * pullMul * dt
       const step = Math.min(pull, dist)
       p.x += (dx / dist) * step
       p.z += (dz / dist) * step

@@ -144,8 +144,15 @@ export class AudioClock {
   private playDelay = 0
   private musicGain = DEFAULT_MUSIC_GAIN
   private sfxGain = DEFAULT_SFX_GAIN
+  /** Tab hidden / window unfocused: output 0, settings unchanged. */
+  private outputMute = false
   private looping = false
   private voices = new VoiceBank(
+    () => this.ctx,
+    () => this.sfxGainNode,
+  )
+  /** Sofia radio operator — idle + wave/boss/fever lines. Independent of hero pack. */
+  private radio = new VoiceBank(
     () => this.ctx,
     () => this.sfxGainNode,
   )
@@ -167,14 +174,19 @@ export class AudioClock {
     this.freqBytes = new Uint8Array(this.analyser.frequencyBinCount)
 
     this.musicGainNode = this.ctx.createGain()
-    this.musicGainNode.gain.value = this.musicGain * MUSIC_BED
     // source → analyser → musicGain → destination (analyse pre-bed level)
     this.analyser.connect(this.musicGainNode)
     this.musicGainNode.connect(this.ctx.destination)
 
     this.sfxGainNode = this.ctx.createGain()
-    this.sfxGainNode.gain.value = this.sfxGain
     this.sfxGainNode.connect(this.ctx.destination)
+    this.applyOutputGains()
+  }
+
+  private applyOutputGains(): void {
+    const duck = this.outputMute ? 0 : 1
+    if (this.musicGainNode) this.musicGainNode.gain.value = this.musicGain * MUSIC_BED * duck
+    if (this.sfxGainNode) this.sfxGainNode.gain.value = this.sfxGain * duck
   }
 
   /** Route buffer source: source → analyser (same as co_der-player MVNodesUtils). */
@@ -246,12 +258,13 @@ export class AudioClock {
   /** Call from a click/key handler so Chrome will actually start audio. */
   async resumeIfNeeded(): Promise<void> {
     this.ensureGraph()
+    if (this.outputMute) return
     if (this.ctx?.state === 'suspended') await this.ctx.resume()
   }
 
   setMusicGain(v: number): void {
     this.musicGain = Math.max(0, Math.min(1, v))
-    if (this.musicGainNode) this.musicGainNode.gain.value = this.musicGain * MUSIC_BED
+    this.applyOutputGains()
   }
 
   getMusicGain(): number {
@@ -260,11 +273,22 @@ export class AudioClock {
 
   setSfxGain(v: number): void {
     this.sfxGain = Math.max(0, Math.min(1, v))
-    if (this.sfxGainNode) this.sfxGainNode.gain.value = this.sfxGain
+    this.applyOutputGains()
   }
 
   getSfxGain(): number {
     return this.sfxGain
+  }
+
+  /** Mute destination without changing saved music/sfx %. */
+  setOutputMute(on: boolean): void {
+    if (this.outputMute === on) return
+    this.outputMute = on
+    this.applyOutputGains()
+  }
+
+  isOutputMuted(): boolean {
+    return this.outputMute
   }
 
   /** Freeze AudioContext clock (songTime stops). */
@@ -436,6 +460,20 @@ export class AudioClock {
     await this.voices.load(catalogUrl)
   }
 
+  async loadRadio(catalogUrl: string): Promise<void> {
+    this.ensureGraph()
+    await this.radio.load(catalogUrl)
+  }
+
+  clearVoices(): void {
+    void this.voices.load('')
+  }
+
+  /** Radio-operator idle mutter. Packs without `idle` stay quiet. */
+  tickIdle(dt: number, on: boolean): void {
+    this.radio.tickIdle(dt, on && !this.outputMute)
+  }
+
   private pruneLive(now: number): void {
     let w = 0
     for (let i = 0; i < this.live.length; i++) {
@@ -480,6 +518,7 @@ export class AudioClock {
   }
 
   beep(kind: BeepKind = 'hit'): void {
+    if (this.outputMute) return
     this.ensureGraph()
     if (!this.ctx || !this.sfxGainNode) return
     const delay = this.admit(kind)
@@ -500,7 +539,11 @@ export class AudioClock {
 
   private playBeep(kind: BeepKind): void {
     if (!this.ctx || !this.sfxGainNode) return
-    this.voices.tryPlay(kind)
+    if (kind === 'wave_start' || kind === 'wave_clear' || kind === 'kill_boss' || kind === 'fever') {
+      this.radio.tryPlay(kind)
+    } else {
+      this.voices.tryPlay(kind)
+    }
     switch (kind) {
       case 'perfect':
         this.tone({ type: 'triangle', freq: 988, endFreq: 1480, dur: 0.12, gain: 0.1 })

@@ -1,0 +1,31 @@
+{
+  "id": "holysee-lite",
+  "caption": "Lite",
+  "voices": "voices/voices.json",
+  "gameData": "E:/SteamLibrary/steamapps/common/Skyrim Special Edition/Data",
+  "mo2Mods": "C:/Users/Admin/AppData/Local/ModOrganizer/Skyrim Special Edition/mods",
+  "modRoot": "tools/skyrim-import/.cache/mod-src/knight/Shinen HolySee Knight SE 1.14",
+  "body": "CBBE 3BA/meshes/actors/character/character assets/femalebody_1.nif",
+  "head": "meshes/Actors/Character/facegendata/facegeom/shingcheng follower.esp/00000918.nif",
+  "headTint": "textures/actors/character/facegendata/facetint/shingcheng follower.esp/00000918.dds",
+  "headDiffuse": "tools/skyrim-import/.cache/femalehead.png",
+  "hands": "CBBE 3BA/meshes/actors/character/character assets/femalehands_1.nif",
+  "feet": "CBBE 3BA/meshes/actors/character/character assets/femalefeet_1.nif",
+  "clothes": [
+    "meshes/shingcheng/armor/Suit/armorblue.nif",
+    "meshes/shingcheng/armor/Suit/dressblue.nif",
+    "meshes/shingcheng/armor/Suit/bootsblue.nif",
+    "meshes/shingcheng/armor/Suit/gauntletsblue.nif",
+    "meshes/shingcheng/armor/Suit/shoulderblue.nif",
+    "meshes/shingcheng/armor/Suit/accblue.nif",
+    "meshes/shingcheng/armor/leah lilith/ribbon headbandblue.nif"
+  ],
+  "skeletonNif": "XP32 Maximum Skeleton Special Extended/meshes/actors/character/character assets female/skeleton_female.nif",
+  "skeletonHkx": "tools/skyrim-import/.cache/skeleton_female.hkx",
+  "gaits": {
+    "idle": "tools/skyrim-import/.cache/mt_idle.hkx",
+    "walk": "tools/skyrim-import/.cache/mt_walkforward.hkx",
+    "cast": "tools/skyrim-import/.cache/mrh_release.hkx"
+  },
+  "out": "../co_der-resource/beat-roguelite/figures/holysee-lite/models/body.glb"
+}

@@ -5,20 +5,16 @@ import {
 } from '../../content/characters'
 import { DEFAULT_MARTIAL, DEFAULT_STARTER, type MagicId, type MartialId, type StarterId } from '../../content/weapons'
 import {
-  AUTO_FUSE_MAIN_LEVEL,
-  AUTO_FUSE_OFF_LEVEL,
-  fuseIdForOffhand,
   fuseOfferName,
   isFuseUpgradeId,
   learnIdForOffhand,
   offhandForFuseId,
-  spellLevel,
 } from '../../content/fusions'
 import type { OwnedUpgrade, UpgradeOffer } from '../progression/upgrades'
-import { ownedFusableOffhands } from '../progression/upgrades'
+import { isStackableUpgrade, makeOwned } from '../progression/upgrades'
 import { heatToMult, tickHeat } from './heat'
 import { mulberry32 } from './math'
-import { resolveLoadout, tickPickups, xpToNextFor, grantXp } from '../progression'
+import { resolveLoadout, tickPickups, xpToNextFor, grantXp, drainOfferQueue } from '../progression'
 import type { MetaLoadoutMods } from '../progression/meta'
 import { carapaceStacksForWave, hasRelic, sparkFeverFloor } from '../progression/relics'
 import {
@@ -28,14 +24,14 @@ import {
   tickProjectiles,
   tickWaveClear,
 } from './systems'
-import { spawnWaveChest } from './spawn'
+import { ELITE_FIRST_SEC, rollChestAtSec } from './spawn'
 import { tickFever, tryManualFever } from './beatBridge'
 import { tickRelics } from './status'
 import { ARENA_HALF, WAVE_DURATION_FALLBACK_SEC, WAVE_DURATION_MIN_SEC, type RunMode } from './arena'
 import { generateMap } from './map'
-import { generateField, heatDecayMul, tickGroundBurn } from './weather'
+import { generateField, heatDecayMul, rollWeatherCycle, tickGroundBurn, tickWeatherCycle } from './weather'
+import { pushHint, tickHint } from './hints'
 import { tickFloaters } from './combat'
-import { ELITE_FIRST_SEC } from './spawn'
 import type { World } from './types'
 
 export {
@@ -103,8 +99,9 @@ export function createWorld(opts: CreateWorldOpts): World {
   const xpToNext = progress?.xpToNext ?? xpToNextFor(level)
   const arenaHalf = ARENA_HALF
   const obstacles = generateMap(rng, arenaHalf, wave)
-  const field = generateField(seed, wave, arenaHalf)
-
+  const duration = Math.max(WAVE_DURATION_MIN_SEC, waveDuration ?? WAVE_DURATION_FALLBACK_SEC)
+  const weatherCycle = rollWeatherCycle(seed, wave, duration)
+  const field = generateField(seed, wave, arenaHalf, weatherCycle[0] ?? 'clear', 0)
   const w: World = {
     arena: { half: arenaHalf },
     player: {
@@ -157,11 +154,12 @@ export function createWorld(opts: CreateWorldOpts): World {
     pickups: [],
     floaters: [],
     auraPulseT: 0,
-    orbitAng: 0,
-    orbitPulseT: 0,
     flameBoostT: 0,
     obstacles,
     weatherId: field.weatherId,
+    fieldSeed: seed,
+    weatherCycle,
+    weatherSlot: 0,
     windX: field.windX,
     windZ: field.windZ,
     terrain: field.terrain,
@@ -197,11 +195,13 @@ export function createWorld(opts: CreateWorldOpts): World {
     loadout,
     upgrades: [...upgrades],
     waveTime: 0,
-    // Match combat window; silent fallback ~4 minutes (clamped 3–5 elsewhere).
-    waveDuration: Math.max(WAVE_DURATION_MIN_SEC, waveDuration ?? WAVE_DURATION_FALLBACK_SEC),
+    waveDuration: duration,
     spawnCd: 1.2,
     eliteCd: ELITE_FIRST_SEC,
+    eliteSpawned: false,
     bossSpawned: false,
+    chestAtSec: rollChestAtSec(duration, rng),
+    chestSpawned: false,
     lootGraceT: 0,
     nextPickupId: 1,
     cleared: false,
@@ -217,6 +217,7 @@ export function createWorld(opts: CreateWorldOpts): World {
       : 0,
     bossHint: '',
     bossHintT: 0,
+    hintKind: null,
     eliteTeleT: 0,
     eliteTeleMax: 0,
     eliteTeleX: 0,
@@ -224,7 +225,6 @@ export function createWorld(opts: CreateWorldOpts): World {
     elitePending: false,
     runMode,
   }
-  spawnWaveChest(w)
   return w
 }
 
@@ -247,6 +247,7 @@ export function tickWorld(
     w.stats.comboBreakT = Math.max(0, w.stats.comboBreakT - dt)
     w.stats.comboMilestoneT = Math.max(0, w.stats.comboMilestoneT - dt)
     if (w.stats.comboMilestoneT <= 0) w.stats.comboMilestone = null
+    tickHint(w, dt)
     w.player.invuln = Math.max(0, w.player.invuln - dt)
     w.player.hurtFlash = Math.max(0, w.player.hurtFlash - dt)
     tickFloaters(w, dt)
@@ -257,6 +258,8 @@ export function tickWorld(
 
   // Combat clock is real-time (fixed 3–5 min window), not full track length.
   w.waveTime = Math.min(w.waveDuration, w.waveTime + dt)
+  tickHint(w, dt)
+  tickWeatherCycle(w)
   w.stats.beatFlashT = Math.max(0, w.stats.beatFlashT - dt)
   if (w.stats.beatFlashT <= 0) w.stats.beatFlash = null
   w.stats.levelFlashT = Math.max(0, w.stats.levelFlashT - dt)
@@ -290,10 +293,35 @@ export function tickWorld(
   tryManualFever(w, clock, keys.feverPressed)
   tickFever(w, dt, clock)
   tickRelics(w, dt)
+  tickWildOffers(w, clock)
+}
+
+/** 盲抽：局内三选当场随机一张。关末 `wave` 留给 application 切波。 */
+function tickWildOffers(w: World, clock: AudioClockPort): void {
+  if (!w.loadout.wildPick || w.dead) return
+  if (!w.offer) drainOfferQueue(w)
+  let guard = 8
+  while (guard-- > 0) {
+    if (!w.offer?.length || !w.pickReason || w.pickReason === 'wave') return
+    const picked = w.offer[Math.floor(w.rng() * w.offer.length)]!
+    applyUpgradeToWorld(w, picked, {
+      consumeLevel: w.pickReason === 'level',
+      announce: 'wild',
+    })
+    w.offer = null
+    w.pickReason = null
+    w.player.invuln = Math.max(w.player.invuln, 0.45)
+    w.stats.levelFlashT = Math.max(w.stats.levelFlashT, 0.55)
+    clock.beep('upgrade')
+    drainOfferQueue(w)
+  }
 }
 
 export function chooseUpgrade(w: World, offer: UpgradeOffer): OwnedUpgrade[] {
-  return [...w.upgrades, { id: offer.id, grade: offer.grade }]
+  if (!isStackableUpgrade(offer.id) && w.upgrades.some((u) => u.id === offer.id)) {
+    return w.upgrades
+  }
+  return [...w.upgrades, makeOwned(offer.id, offer.grade, offer.meta)]
 }
 
 function refreshLoadout(w: World): void {
@@ -313,44 +341,18 @@ function refreshLoadout(w: World): void {
   w.player.r = w.loadout.radius
 }
 
-/**
- * 主手与某副手灌注层级都达标 → 自动融合（不占三选池）。
- * 多门副手同时达标时，吃灌注层级最高的那门。
- */
-export function tryAutoFuse(w: World): boolean {
-  if (w.upgrades.some((o) => isFuseUpgradeId(o.id))) return false
-  const main = w.loadout.starterId
-  if (spellLevel(main, w.upgrades, main) < AUTO_FUSE_MAIN_LEVEL) return false
-  const ready = ownedFusableOffhands(main, w.upgrades)
-    .map((off) => ({ off, lv: spellLevel(main, w.upgrades, off) }))
-    .filter((x) => x.lv >= AUTO_FUSE_OFF_LEVEL)
-  if (ready.length === 0) return false
-  ready.sort((a, b) => b.lv - a.lv)
-  const off = ready[0]!.off
-  const learn = learnIdForOffhand(off)
-  w.upgrades = [
-    ...w.upgrades.filter((u) => u.id !== learn && !isFuseUpgradeId(u.id)),
-    { id: fuseIdForOffhand(off), grade: 1 },
-  ]
-  refreshLoadout(w)
-  w.bossHint = fuseOfferName(main, off)
-  w.bossHintT = 2.5
-  return true
-}
-
 /** Re-apply loadout after a mid-run upgrade. */
 export function applyUpgradeToWorld(
   w: World,
   offer: UpgradeOffer,
-  opts?: { consumeLevel?: boolean },
+  opts?: { consumeLevel?: boolean; announce?: 'auto' | 'wild' | 'none' },
 ): void {
   if (isFuseUpgradeId(offer.id)) {
-    // 遗留：融合已改自动；若仍传入 fuse 卡则按同规则落地
     const off = offhandForFuseId(offer.id)
     const learn = learnIdForOffhand(off)
     w.upgrades = [
-      ...w.upgrades.filter((u) => u.id !== learn && !isFuseUpgradeId(u.id)),
-      { id: offer.id, grade: 1 },
+      ...w.upgrades.filter((u) => u.id !== learn),
+      makeOwned(offer.id, 1, offer.meta),
     ]
   } else {
     w.upgrades = chooseUpgrade(w, offer)
@@ -370,8 +372,14 @@ export function applyUpgradeToWorld(
       w.stats.heat = Math.max(w.stats.heat, floor)
     }
   }
-  tryAutoFuse(w)
-  if (opts?.consumeLevel !== false) {
+  const announce = opts?.announce ?? 'auto'
+  if (announce === 'wild') {
+    pushHint(w, 'wild', `盲抽 · ${offer.label}`)
+  } else if (announce === 'auto' && isFuseUpgradeId(offer.id)) {
+    const off = offhandForFuseId(offer.id)
+    pushHint(w, 'fuse', fuseOfferName(w.loadout.starterId, off))
+  }
+  if (opts?.consumeLevel === true) {
     w.stats.pendingLevelUps = Math.max(0, w.stats.pendingLevelUps - 1)
   }
 }

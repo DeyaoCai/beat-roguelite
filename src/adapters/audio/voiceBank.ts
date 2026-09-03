@@ -11,20 +11,32 @@ const BARK: Partial<Record<BeepKind, { chance: number; cool: number }>> = {
   wave_clear: { chance: 0.9, cool: 5 },
 }
 
+const IDLE_FIRST = 3.2
+const IDLE_GAP_MIN = 8
+const IDLE_GAP_SPAN = 10
+const IDLE_RETRY = 1.8
+
 /** Figure-pack voice barks. Missing catalog / files → silent. */
 export class VoiceBank {
   private byKind = new Map<BeepKind, AudioBuffer[]>()
+  private idle: AudioBuffer[] = []
   private busyUntil = 0
   private coolUntil = 0
   private cursor = 0
+  private idleWait = IDLE_FIRST
+  private readonly ctxOf: () => AudioContext | null
+  private readonly destOf: () => GainNode | null
 
-  constructor(
-    private readonly ctxOf: () => AudioContext | null,
-    private readonly destOf: () => GainNode | null,
-  ) {}
+  constructor(ctxOf: () => AudioContext | null, destOf: () => GainNode | null) {
+    this.ctxOf = ctxOf
+    this.destOf = destOf
+  }
 
   async load(catalogUrl: string): Promise<void> {
     this.byKind.clear()
+    this.idle = []
+    this.idleWait = IDLE_FIRST + Math.random() * 2
+    if (!catalogUrl) return
     let json: Catalog
     try {
       const res = await fetch(catalogUrl)
@@ -57,19 +69,35 @@ export class VoiceBank {
         }
         bufs.push(buf)
       }
-      if (bufs.length) this.byKind.set(kind as BeepKind, bufs)
+      if (!bufs.length) continue
+      if (kind === 'idle') this.idle = bufs
+      else this.byKind.set(kind as BeepKind, bufs)
     }
   }
 
   tryPlay(kind: BeepKind): void {
     const spec = BARK[kind]
     const pool = this.byKind.get(kind)
+    if (!spec || !pool?.length) return
+    if (Math.random() > spec.chance) return
+    if (!this.speak(pool, spec.cool)) return
+  }
+
+  /** Ambient mutter. No-op if the pack has no `idle` lines (sisters). */
+  tickIdle(dt: number, on: boolean): void {
+    if (!on || !this.idle.length) return
+    this.idleWait -= dt
+    if (this.idleWait > 0) return
+    const ok = this.speak(this.idle, IDLE_GAP_MIN)
+    this.idleWait = ok ? IDLE_GAP_MIN + Math.random() * IDLE_GAP_SPAN : IDLE_RETRY
+  }
+
+  private speak(pool: AudioBuffer[], cool: number): boolean {
     const ctx = this.ctxOf()
     const dest = this.destOf()
-    if (!spec || !pool?.length || !ctx || !dest) return
+    if (!ctx || !dest) return false
     const now = ctx.currentTime
-    if (now < this.busyUntil || now < this.coolUntil) return
-    if (Math.random() > spec.chance) return
+    if (now < this.busyUntil || now < this.coolUntil) return false
     const buf = pool[this.cursor % pool.length]!
     this.cursor += 1
     const src = ctx.createBufferSource()
@@ -77,6 +105,7 @@ export class VoiceBank {
     src.connect(dest)
     src.start(now)
     this.busyUntil = now + buf.duration
-    this.coolUntil = now + spec.cool
+    this.coolUntil = now + cool
+    return true
   }
 }

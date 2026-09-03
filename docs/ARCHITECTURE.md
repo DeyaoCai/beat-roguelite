@@ -10,7 +10,8 @@ src/
     progression/     XP · gold · upgrades/luck · drops · loadout
     shared/          DomainEvent · AudioClockPort · KeyState
   application/
-    runSession.ts    Scene FSM + rAF orchestration (boot entry)
+    runSession.ts    boot + rAF 接线（唯一入口 `boot`）
+    session/         prepInput · playFrame · fade · persist · snapshot
   adapters/
     audio/           AudioClock (implements AudioClockPort)
     input/           keys (KeyState from domain ports)
@@ -21,13 +22,27 @@ src/
     skyrim-female/   老滚适配器（禁止 import TKA / wardrobe / presentation）
   wardrobe/          catalog · session · preview · ui（衣橱 BC；枢纽只认 createWardrobe）
   presentation/
-    render/          threeOrtho · hubStage · highway · hud2d · hudPlay · snapshot
+    render/          threeOrtho · hubStage · highway · hud2d（按 scene 拆到 hudHub/Prep/…） · hudPlay · snapshot
     ui/              tune panel
-  content/           Static catalogs（characters 身份 · kits 底数 · looks 指针；衣橱表在 wardrobe/catalog）
+  content/           Static catalogs（characters · kits · looks · weapons · weather）
+                     + rules/ 玩法数字与三选配额（domain 只读表）
   app/boot.ts        Re-exports application/runSession
 ```
 
-`application/runSession` 启动时 `resolveActiveFigureId()`（`?figure=` > `active.json`），再交给 renderer。无 `wardrobe` 的包枢纽不列出衣橱。
+`application/runSession` 启动时 `resolveActiveFigureId()`（`?figure=` > persist 枢纽 id > `active.json`），再交给 renderer。无 `wardrobe` 的包枢纽不列出衣橱。Sofia 固定为局内通讯员（独立 scene + 独立 voice bank）。
+
+### 玩法规则 vs 引擎
+
+| 放哪 | 什么 |
+|------|------|
+| `content/rules/` | 玩法数字总表（三选、波次、刷怪、卡池、Boss **含招式数字**、热度/Fever、元素…） |
+| `content/weapons` · `kits` · `weather` · `meta` | 武器/Kit/天气/货架文案（本就是表，不并入 rules） |
+| `content/fusions.ts` | 融合门槛与门 id 映射 |
+| Runtime 实例 | `Enemy` / `UpgradeOffer` / `OwnedUpgrade` / `Bullet` / `GroundPickup` / `Slash` / `Crater` / `ChainBolt` 的 `.meta` 挂表指针；局内态在实例上 |
+| `domain/*` | 读表执行 + 实例关联 |
+| `plans/.../design.md` | 规则散文 SSOT |
+
+规则层大体抽完；Boss **招式数字**已进 `content/rules/bosses`（`skills`），domain 只保留行为顺序。再往下才是弹道微逻辑本身。
 
 ### Dependency rules
 
@@ -44,13 +59,13 @@ adapters                    →  domain ports / chart parse
 domain/*                    ✖  presentation · adapters · three · application · wardrobe · figures
 ```
 
-Enforce: `pnpm check:ddd`
+Enforce: `pnpm check:ddd` · 规则纯函数：`pnpm test`
 
 ### Domain events (`World.domainEvents`)
 
 `NoteJudged` · `EnemyDefeated` · `LevelUpPending` · `FeverBurst`
 
-Drained each play frame in `application/runSession`.
+Drained each play frame in `application/session/playFrame`.
 
 ### Combat split
 

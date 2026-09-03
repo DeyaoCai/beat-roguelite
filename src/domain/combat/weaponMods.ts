@@ -100,8 +100,8 @@ export function weaponHitMul(kind: DamageKind, ctx?: WeaponHitCtx | null): numbe
       break
     }
     case 'star': {
-      // 落岩：落点主伤；溅射随距中心衰减；多人溅射略稀释
-      if (role === 'splash' || role === 'graft') {
+      // 落岩：落点主伤，圈内随距衰减
+      if (role === 'graft') {
         mul *= 0.72
         if (rn != null) mul *= clamp(1.05 - rn * 0.45, 0.55, 1)
         mul *= targetMul(ctx.targets, 2, 4, 0.05)
@@ -110,17 +110,6 @@ export function weaponHitMul(kind: DamageKind, ctx?: WeaponHitCtx | null): numbe
         if (rn != null && rn < 0.35) mul *= 1.06
       }
       if (role === 'pulse') mul *= 1.05
-      break
-    }
-    case 'orbit': {
-      // 环刃：绕身中距；扫到多人略稀释；Perfect 扫圈略强
-      mul *= targetMul(ctx.targets, 1, 2, 0.06)
-      if (rn != null) {
-        if (rn < 0.55) mul *= 0.94
-        else if (rn > 1.15) mul *= 0.9
-        else mul *= 1.06
-      }
-      if (role === 'pulse') mul *= 1.08
       break
     }
     case 'fever':

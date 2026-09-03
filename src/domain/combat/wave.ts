@@ -1,10 +1,11 @@
 import type { AudioClockPort } from '../shared/ports'
+import { ARENA_RULES } from '../../content/rules'
 import { applyEnemyDefeatedRewards, openOffer } from '../progression'
 import { isLastStandardWave } from './arena'
 import type { World } from './types'
 
 /** Seconds to pick boss/elite relics before the wave can end. */
-export const LOOT_GRACE_SEC = 8
+export const LOOT_GRACE_SEC = ARENA_RULES.lootGraceSec
 
 function relicsOnGround(w: World): boolean {
   return w.pickups.some((p) => p.kind === 'relic_minor' || p.kind === 'relic_major')

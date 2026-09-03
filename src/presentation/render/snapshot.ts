@@ -2,17 +2,22 @@ import type { AudioClock } from '../../adapters/audio/clock'
 import { FEVER_COOLDOWN_SEC, comboDamageMul } from '../../domain/combat/beatBridge'
 import { bossName } from '../../domain/combat/bosses'
 import { ARENA_HALF } from '../../domain/combat/arena'
-import type { World } from '../../domain/combat/types'
-import { UPGRADE_POOL, magicSlotCap, type OwnedUpgrade } from '../../domain/progression'
+import type { ElemSource, Enemy, World } from '../../domain/combat/types'
+import {
+  UPGRADE_POOL,
+  type OwnedUpgrade,
+} from '../../domain/progression'
+import { fusedOffhandsOf, spellLevel } from '../../content/fusions'
 import type { HighwayNoteView } from '../../domain/rhythm/chart'
 import type { JudgeResult } from '../../domain/rhythm/judge'
 import { HUB_ITEMS } from '../../content/hub'
 import { DEFAULT_HUB_THEME, hubThemeById } from '../../content/hubThemes'
-import type { FrameSnapshot, HudUpgrade, HudWeapon, SceneKind } from './types'
+import { isRhythmEnabled } from '../../lib/rhythmEnabled'
+import type { FrameSnapshot, HudFuse, HudUpgrade, HudWeapon, SceneKind } from './types'
 import { starterLabel } from '../../content/weapons'
 import { weatherById } from '../../content/weather'
 
-const LEARN_IDS = new Set(['learn_flame', 'learn_orb', 'learn_aura', 'learn_chain', 'learn_star', 'learn_orbit'])
+const LEARN_IDS = new Set(['learn_flame', 'learn_orb', 'learn_aura', 'learn_chain', 'learn_star'])
 const GRADE_MARK = ['', 'Ⅰ', 'Ⅱ', 'Ⅲ'] as const
 const EMPTY_SPECTRUM = new Float32Array(128)
 
@@ -34,28 +39,45 @@ function kitWeapons(world: World): HudWeapon[] {
   if (L.aura) add('ward_aura', '霜环', '霜', cdRatio(P.auraCd, L.aura.tickInterval))
   if (L.chain) add('thunder_chain', '雷链', '链', cdRatio(P.chainCd, L.chain.interval))
   if (L.star) add('starfall', '落岩', '岩', cdRatio(P.starCd, L.star.interval))
-  if (L.orbit) add('orbit', '环刃', '刃', 0)
 
   const main =
     active.find((w) => w.id === beat) ??
     ({ id: beat, name: starterLabel(beat), glyph: '主', beat: true, cd: 0 } satisfies HudWeapon)
   const offs = active.filter((w) => w.id !== main.id)
-  const cap = magicSlotCap(world.stats.level)
-  const magicSlots = Math.max(cap, offs.length)
   const rows: HudWeapon[] = [{ ...main, beat: true }]
-  for (let i = 0; i < magicSlots; i++) {
-    const filled = offs[i]
-    if (filled) rows.push({ ...filled, beat: false })
-    else rows.push({ id: `magic_slot_${i}`, name: '空槽', glyph: '·', beat: false, empty: true, cd: 0 })
-  }
+  for (const w of offs) rows.push({ ...w, beat: false })
   return rows
+}
+
+function hudFuse(world: World): HudFuse {
+  const main = world.loadout.starterId
+  const owned = world.upgrades
+  const mainLv = spellLevel(main, owned, main)
+  const fusedOff = fusedOffhandsOf(owned)
+  const fused = fusedOff.length
+  const remain = 5 - fused
+  return {
+    mainId: main,
+    mainName: starterLabel(main),
+    mainLv,
+    nextAt: 0,
+    fused,
+    progress: Math.max(0, Math.min(1, fused / 5)),
+    mainNeed: 0,
+    eatName: null,
+    offName: null,
+    offLv: 0,
+    offNeed: 0,
+    emptySlots: Math.max(0, remain),
+    slotNextLv: 0,
+  }
 }
 
 function hudUpgrades(owned: OwnedUpgrade[]): HudUpgrade[] {
   const out: HudUpgrade[] = []
   for (const u of owned) {
     if (LEARN_IDS.has(u.id)) continue
-    const def = UPGRADE_POOL.find((d) => d.id === u.id)
+    const def = u.meta ?? UPGRADE_POOL.find((d) => d.id === u.id)
     if (!def) continue
     const mark = def.kind === 'stat' ? (GRADE_MARK[u.grade] ?? '') : ''
     out.push({
@@ -74,12 +96,28 @@ const emptyHighway = {
   labels: ['Space'],
   notes: [] as HighwayNoteView[],
   songTitle: '',
+  songDuration: '',
   songProgress: 0,
   judgePulse: 0,
   judgeResult: null as JudgeResult | null,
   judgeLane: -1,
   judgeSeq: 0,
   timingHint: null as 'early' | 'late' | null,
+}
+
+const ELEM_KEYS: ElemSource[] = ['flame', 'orb', 'aura', 'chain', 'star']
+
+function enemyElemBuildup(e: Enemy): { elem?: ElemSource; stacks: number } {
+  let stacks = 0
+  let elem: ElemSource | undefined
+  for (const k of ELEM_KEYS) {
+    const n = e.elemStacks[k]
+    if (n > stacks) {
+      stacks = n
+      elem = k
+    }
+  }
+  return stacks > 0 && elem ? { elem, stacks } : { stacks: 0 }
 }
 
 export function emptySnapshot(scene: SceneKind): FrameSnapshot {
@@ -96,6 +134,7 @@ export function emptySnapshot(scene: SceneKind): FrameSnapshot {
       hurtFlash: 0,
       yaw: 0,
       moving: false,
+      dashing: false,
       slowT: 0,
       poisonT: 0,
       bleedT: 0,
@@ -110,7 +149,7 @@ export function emptySnapshot(scene: SceneKind): FrameSnapshot {
     slashes: [],
     craters: [],
     aura: null,
-    orbit: null,
+    fxMix: { thunder: false, split: false, slow: false, knock: false, volley: false },
     chains: [],
     pops: [],
     floaters: [],
@@ -148,6 +187,21 @@ export function emptySnapshot(scene: SceneKind): FrameSnapshot {
     starterId: 'flame',
     starterName: '风息',
     weapons: [],
+    fuse: {
+      mainId: 'flame',
+      mainName: '风息',
+      mainLv: 1,
+      nextAt: 0,
+      fused: 0,
+      progress: 0,
+      mainNeed: 0,
+      eatName: null,
+      offName: null,
+      offLv: 0,
+      offNeed: 0,
+      emptySlots: 5,
+      slotNextLv: 0,
+    },
     upgrades: [],
     kills: 0,
     maxCombo: 0,
@@ -158,8 +212,12 @@ export function emptySnapshot(scene: SceneKind): FrameSnapshot {
     luck: 0,
     armorDr: 0,
     dodgeChance: 0,
+    weatherId: 'clear',
     weatherName: '晴',
     weatherBlurb: '',
+    weatherNextName: '',
+    windX: 1,
+    windZ: 0,
     carapaceStacks: 0,
     relics: [],
     runMode: 'standard',
@@ -174,6 +232,10 @@ export function emptySnapshot(scene: SceneKind): FrameSnapshot {
     hubThemeBlurb: hubThemeById(DEFAULT_HUB_THEME).blurb,
     optionsRow: 0,
     shopIndex: 0,
+    codexTab: 'people',
+    codexIndex: 0,
+    codexSubject: 'hero',
+    codexFoeKind: null,
     prepFocus: 'mode',
     prepContractIndex: 0,
     musicGain: 1,
@@ -182,10 +244,14 @@ export function emptySnapshot(scene: SceneKind): FrameSnapshot {
     blessingName: '无',
     duoLearnName: '',
     duoStarterId: '',
+    startFuseNeed: 0,
+    fuseStarterIds: [],
+    fuseCursorId: '',
     contractRows: [],
     contractMul: 1,
     feverMute: false,
     beatMute: false,
+    rhythmEnabled: true,
     shopRows: [],
     fadeBlack: 0,
   }
@@ -213,26 +279,32 @@ export function worldToSnapshot(
       hurtFlash: Math.min(1, world.player.hurtFlash / 0.28),
       yaw: Math.atan2(world.player.facingX, world.player.facingZ),
       moving: world.player.moving,
+      dashing: world.player.dashT > 0,
       slowT: world.player.slowT,
       poisonT: world.player.poisonT,
       bleedT: world.player.bleedT,
       shieldOn: world.player.shieldOn,
       castSeq: world.player.castSeq,
     },
-    enemies: world.enemies.map((e) => ({
-      x: e.x,
-      z: e.z,
-      r: e.r,
-      kind: e.kind,
-      bossId: e.bossId,
-      hurtFlash: Math.min(1, e.hurtFlash / 0.14),
-      hpRatio: e.maxHp > 0 ? Math.max(0, e.hp / e.maxHp) : 0,
-      frozen: e.freezeT > 0,
-      bleed: e.bleedT > 0,
-      amped: e.ampT > 0,
-      broken: e.breakT > 0,
-      weak: e.weakT > 0,
-    })),
+    enemies: world.enemies.map((e) => {
+      const build = enemyElemBuildup(e)
+      return {
+        x: e.x,
+        z: e.z,
+        r: e.r,
+        kind: e.kind,
+        bossId: e.bossId,
+        hurtFlash: Math.min(1, e.hurtFlash / 0.14),
+        hpRatio: e.maxHp > 0 ? Math.max(0, e.hp / e.maxHp) : 0,
+        frozen: e.freezeT > 0,
+        amped: e.ampT > 0,
+        broken: e.breakT > 0,
+        weak: e.weakT > 0,
+        slowed: e.slowT > 0,
+        elem: build.elem,
+        stacks: build.stacks,
+      }
+    }),
     pickups: world.pickups.map((p) => ({
       x: p.x,
       z: p.z,
@@ -281,34 +353,28 @@ export function worldToSnapshot(
           pulse: Math.min(1, world.auraPulseT / 0.34),
         }
       : null,
-    orbit: world.loadout.orbit
-      ? (() => {
-          const O = world.loadout.orbit
-          const pulse = Math.min(1, world.orbitPulseT / 0.32)
-          const n = Math.max(1, O.blades)
-          const radius = O.radius * (pulse > 0 ? 1.28 : 1)
-          const blades = []
-          for (let i = 0; i < n; i++) {
-            const ang = world.orbitAng + (i * Math.PI * 2) / n
-            blades.push({
-              x: world.player.x + Math.cos(ang) * radius,
-              z: world.player.z + Math.sin(ang) * radius,
-            })
-          }
-          return { blades, pulse }
-        })()
-      : null,
+    fxMix: {
+      thunder: world.loadout.graft.bounce,
+      split: world.loadout.graft.split,
+      slow: world.loadout.graft.slow,
+      knock: world.loadout.graft.knockback,
+      volley: world.loadout.graft.volley,
+    },
     chains: world.chains.map((c) => ({
       ax: c.ax,
       az: c.az,
       bx: c.bx,
       bz: c.bz,
       lifeRatio: Math.max(0, c.life / c.maxLife),
+      kind: c.meta.source,
+      hop: c.hop,
     })),
     pops: world.fxPops.map((p) => ({
       x: p.x,
       z: p.z,
       kind: p.kind,
+      dirX: p.dirX,
+      dirZ: p.dirZ,
       lifeRatio: Math.max(0, p.life / p.maxLife),
     })),
     floaters: world.floaters.map((f) => ({
@@ -366,6 +432,7 @@ export function worldToSnapshot(
     starterId: world.loadout.starterId,
     starterName: starterLabel(world.loadout.starterId),
     weapons: kitWeapons(world),
+    fuse: hudFuse(world),
     upgrades: hudUpgrades(world.upgrades),
     kills: runKills + world.stats.kills,
     maxCombo: world.stats.maxCombo,
@@ -401,8 +468,15 @@ export function worldToSnapshot(
     luck: world.loadout.luck,
     armorDr: world.loadout.armorDr,
     dodgeChance: world.loadout.dodgeChance,
+    weatherId: world.weatherId,
     weatherName: weatherById(world.weatherId).name,
     weatherBlurb: weatherById(world.weatherId).blurb,
+    weatherNextName: (() => {
+      const next = world.weatherCycle[world.weatherSlot + 1]
+      return next ? weatherById(next).name : ''
+    })(),
+    windX: world.windX,
+    windZ: world.windZ,
     carapaceStacks: world.carapaceStacks,
     relics: world.upgrades.filter((u) => u.id.startsWith('relic_')).map((u) => u.id),
     runMode: world.runMode,
@@ -417,6 +491,10 @@ export function worldToSnapshot(
     hubThemeBlurb: hubThemeById(DEFAULT_HUB_THEME).blurb,
     optionsRow: 0,
     shopIndex: 0,
+    codexTab: 'people',
+    codexIndex: 0,
+    codexSubject: 'hero',
+    codexFoeKind: null,
     prepFocus: 'mode',
     prepContractIndex: 0,
     musicGain: clock.getMusicGain(),
@@ -425,10 +503,14 @@ export function worldToSnapshot(
     blessingName: '',
     duoLearnName: '',
     duoStarterId: '',
+    startFuseNeed: 0,
+    fuseStarterIds: [],
+    fuseCursorId: '',
     contractRows: [],
     contractMul: 1,
     feverMute: world.loadout.muteFever,
     beatMute: world.loadout.muteBeat,
+    rhythmEnabled: isRhythmEnabled(),
     shopRows: [],
     fadeBlack: 0,
   }

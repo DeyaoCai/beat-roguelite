@@ -31,7 +31,7 @@ internal static class Program
     static int Main(string[] args)
     {
         var inbox = DefaultInbox();
-        var output = Path.Combine("public", "figures", "tka-jodi", "models");
+        var output = Path.Combine("..", "co_der-resource", "beat-roguelite", "figures", "tka-jodi", "models");
         var game = EGame.GAME_UE4_27;
         string? aes = null;
         var inspectOnly = false;
@@ -82,7 +82,7 @@ internal static class Program
                         tka-import — 解压模组包 → 挂载 pak → 导出 glb/png + 原始 DataTable
 
                           --in      下载目录（zip/7z/rar/pak）。默认：Vortex TKA 下载目录（若存在），否则 inbox
-                          --out     网页模型目录，默认 public/figures/tka-jodi/models
+                          --out     网页模型目录，默认 ../co_der-resource/beat-roguelite/figures/tka-jodi/models
                           --game    UE 版本枚举，默认 GAME_UE4_27
                           --aes     正包 AES。省略时读 TKA_AES，再扫本机 Shipping.exe（AESDumpster 同款）
                           --all     也导入超过 150MB 的包（地图等）
@@ -90,7 +90,7 @@ internal static class Program
                           --only    只处理文件名包含该字符串的包（例：Lips）
                           --inspect 只挂载并列出 pak 内文件，不导出
                           --list-game-anims  列出正包里文件名像走路/待机/开火的 AnimSequence 路径
-                          --game-anims       从正包导出那些动作到 public/figures/tka-jodi/models/TKA_Anim
+                          --game-anims       从正包导出那些动作到 ../co_der-resource/beat-roguelite/figures/tka-jodi/models/TKA_Anim
                           写出 tables.json（原表）与 files.json（资源清单）。槽位/化妆语义在网页 catalog。
                         """);
                     return 0;
@@ -119,7 +119,7 @@ internal static class Program
             {
                 if (cache.Bootstrap(inbox, maxBytes))
                 {
-                    Console.WriteLine("  缓存：现有下载包记为已导入（模型已在 public/figures/tka-jodi/models）");
+                    Console.WriteLine("  缓存：现有下载包记为已导入（模型已在 co_der-resource/beat-roguelite/figures/tka-jodi/models）");
                     cache.Save(output);
                 }
             }

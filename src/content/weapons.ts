@@ -36,9 +36,8 @@ export const STARTERS: { id: StarterId; name: string; blurb: string }[] = [
   { id: 'flame', name: '风息', blurb: '朝前短锥 · 出门击退' },
   { id: 'spirit_orb', name: '火球', blurb: '点射分裂 · 拍点再射' },
   { id: 'ward_aura', name: '霜环', blurb: '贴身持续 · 出门减速' },
-  { id: 'thunder_chain', name: '雷链', blurb: '弹跳群伤 · 出门三跳' },
-  { id: 'starfall', name: '落岩', blurb: '落地溅射 · 拍点再砸' },
-  { id: 'orbit', name: '环刃', blurb: '绕身飞刃 · 出门两把' },
+  { id: 'thunder_chain', name: '雷链', blurb: '弹跳群伤 · 出门一跳' },
+  { id: 'starfall', name: '落岩', blurb: '砸点多发 · 拍点再砸' },
 ]
 
 export const DEFAULT_STARTER: StarterId = 'flame'
@@ -47,9 +46,9 @@ export function starterLabel(id: StarterId): string {
   return STARTERS.find((s) => s.id === id)?.name ?? id
 }
 
-/** 魔：霜环 / 连锁 / 火球 / 落岩 / 环刃。可叠多门。 */
-export type MagicId = 'spirit_orb' | 'ward_aura' | 'thunder_chain' | 'starfall' | 'orbit'
-export type MagicKind = 'orb' | 'aura' | 'chain' | 'star' | 'orbit'
+/** 魔：霜环 / 连锁 / 火球 / 落岩。可叠多门。 */
+export type MagicId = 'spirit_orb' | 'ward_aura' | 'thunder_chain' | 'starfall'
+export type MagicKind = 'orb' | 'aura' | 'chain' | 'star'
 
 export type MagicOrbDef = {
   id: MagicId
@@ -98,20 +97,7 @@ export type MagicStarDef = {
   beatMul: number
 }
 
-export type MagicOrbitDef = {
-  id: MagicId
-  name: string
-  kind: 'orbit'
-  radius: number
-  blades: number
-  spin: number
-  damage: number
-  bladeR: number
-  hitCd: number
-  beatMul: number
-}
-
-export type MagicDef = MagicOrbDef | MagicAuraDef | MagicChainDef | MagicStarDef | MagicOrbitDef
+export type MagicDef = MagicOrbDef | MagicAuraDef | MagicChainDef | MagicStarDef
 
 export const MAGICS: Record<MagicId, MagicDef> = {
   spirit_orb: {
@@ -140,7 +126,7 @@ export const MAGICS: Record<MagicId, MagicDef> = {
     name: '雷链',
     kind: 'chain',
     range: 7.2,
-    jumps: 3,
+    jumps: 1,
     jumpRange: 4.2,
     damage: 2.1,
     interval: 0.85,
@@ -156,18 +142,6 @@ export const MAGICS: Record<MagicId, MagicDef> = {
     craterLife: 0.32,
     range: 6,
     beatMul: 1.45,
-  },
-  orbit: {
-    id: 'orbit',
-    name: '环刃',
-    kind: 'orbit',
-    radius: 2.05,
-    blades: 2,
-    spin: 2.55,
-    damage: 0.62,
-    bladeR: 0.42,
-    hitCd: 0.28,
-    beatMul: 1.4,
   },
 }
 

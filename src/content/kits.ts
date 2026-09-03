@@ -30,7 +30,7 @@ export const KITS: Record<KitId, KitDef> = {
     radius: 0.58,
     heatDecayMul: 1,
     hurtHeatMul: 1,
-    damageMul: 1,
+    damageMul: 2.4,
     critChance: 0,
     xpMul: 1,
     defaultStarter: 'flame',

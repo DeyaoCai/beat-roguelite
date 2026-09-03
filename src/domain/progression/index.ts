@@ -4,10 +4,12 @@
 export {
   UPGRADE_POOL,
   pickThree,
+  rollStartStat,
   ownedFusableOffhands,
   totalLuck,
   rollGrade,
   gradeDetail,
+  makeOwned,
   OFFHAND_CAP,
   MAGIC_SLOT_MAX,
   magicSlotCap,
@@ -15,6 +17,7 @@ export {
   magicSlotUnlockedAt,
   isLearnUpgradeId,
   isSpellBoostId,
+  isStackableUpgrade,
   activeOffhandCount,
   atOffhandCap,
   type UpgradeId,
@@ -38,12 +41,18 @@ export {
   starterForLearn,
   cycleDuoLearn,
   ensureDuoLearn,
+  startFuseNeed,
+  ensureStartFuses,
+  cycleStartFuseCursor,
+  toggleStartFuse,
+  duoFuseUpgradeId,
   metaLoadoutMods,
   blessingStartGold,
   toggleContract,
   contractBankMul,
   contractFromKey,
   type MetaLoadoutMods,
+  type ShopRunStacks,
 } from './meta'
 
 export {
@@ -60,6 +69,8 @@ export {
   xpToNextFor,
   xpForHit,
 } from './drops'
+
+export { makePickupMeta, type PickupMeta, type PickupKind } from './pickupMeta'
 
 export {
   isRelicId,

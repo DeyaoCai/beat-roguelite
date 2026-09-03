@@ -1,5 +1,6 @@
+import { isRhythmEnabled } from '../lib/rhythmEnabled'
 import { BLESSINGS, CONTRACTS, type BlessingId, type ContractId } from './meta'
-import { TRACKS } from './tracks'
+import { listTracks, SHIP_SILENT_TRACK } from './tracks'
 import { STARTERS, type StarterId } from './weapons'
 
 const KEY = 'beat-roguelite.prep.v1'
@@ -10,12 +11,12 @@ const LEARN_IDS = new Set([
   'learn_aura',
   'learn_chain',
   'learn_star',
-  'learn_orbit',
 ])
 
 const BLESSING_IDS = new Set<string>(BLESSINGS.map((b) => b.id))
 const STARTER_IDS = new Set<string>(STARTERS.map((s) => s.id))
-const TRACK_IDS = new Set(TRACKS.map((t) => t.id))
+const TRACK_IDS = new Set(listTracks().map((t) => t.id))
+const SILENT_ID = SHIP_SILENT_TRACK.id
 const CONTRACT_IDS = new Set<string>(CONTRACTS.map((c) => c.id))
 
 export type PrepPersist = {
@@ -24,6 +25,7 @@ export type PrepPersist = {
   starterId: StarterId
   blessingId: BlessingId | null
   duoLearnId: string
+  fuseLearnIds: string[]
   contractIds: ContractId[]
   runMode: 'standard' | 'endless'
 }
@@ -60,16 +62,24 @@ export function loadPrep(): PrepPersist | null {
     if (p.v !== 1) return null
     const starterId = parseStarter(p.starterId)
     if (!starterId) return null
-    const trackId = typeof p.trackId === 'string' && TRACK_IDS.has(p.trackId) ? p.trackId : null
+    const trackId = isRhythmEnabled()
+      ? typeof p.trackId === 'string' && TRACK_IDS.has(p.trackId)
+        ? p.trackId
+        : null
+      : SILENT_ID
     if (!trackId) return null
     const duoLearnId =
       typeof p.duoLearnId === 'string' && LEARN_IDS.has(p.duoLearnId) ? p.duoLearnId : 'learn_orb'
+    const fuseLearnIds = Array.isArray(p.fuseLearnIds)
+      ? p.fuseLearnIds.filter((id): id is string => typeof id === 'string' && LEARN_IDS.has(id))
+      : [duoLearnId]
     return {
       v: 1,
       trackId,
       starterId,
       blessingId: parseBlessing(p.blessingId),
       duoLearnId,
+      fuseLearnIds: fuseLearnIds.length > 0 ? fuseLearnIds : [duoLearnId],
       contractIds: parseContracts(p.contractIds),
       runMode: parseRunMode(p.runMode),
     }
@@ -82,10 +92,17 @@ export function savePrep(next: Omit<PrepPersist, 'v'>): void {
   try {
     const row: PrepPersist = {
       v: 1,
-      trackId: TRACK_IDS.has(next.trackId) ? next.trackId : TRACKS[0]!.id,
+      trackId: isRhythmEnabled()
+        ? TRACK_IDS.has(next.trackId)
+          ? next.trackId
+          : listTracks()[0]!.id
+        : SILENT_ID,
       starterId: parseStarter(next.starterId) ?? STARTERS[0]!.id,
       blessingId: parseBlessing(next.blessingId),
       duoLearnId: LEARN_IDS.has(next.duoLearnId) ? next.duoLearnId : 'learn_orb',
+      fuseLearnIds: (next.fuseLearnIds ?? [])
+        .filter((id) => LEARN_IDS.has(id))
+        .filter((id, i, arr) => arr.indexOf(id) === i),
       contractIds: parseContracts(next.contractIds),
       runMode: parseRunMode(next.runMode),
     }

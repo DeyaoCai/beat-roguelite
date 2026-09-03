@@ -31,8 +31,8 @@ function part(
   m.position.set(x, y, z)
   m.scale.set(sx, sy, sz)
   m.rotation.set(rx, ry, rz)
-  m.castShadow = true
-  m.receiveShadow = true
+  m.castShadow = false
+  m.receiveShadow = false
   m.userData.homeMat = mat
   parent.add(m)
   return m
@@ -250,22 +250,6 @@ export type EnemyVisualKind =
   | 'choir'
   | 'tyrant'
 
-const KINDS: EnemyVisualKind[] = [
-  'chaser',
-  'shooter',
-  'brute',
-  'spitter',
-  'frost',
-  'leech',
-  'elite',
-  'chest',
-  'warden',
-  'caller',
-  'hex',
-  'choir',
-  'tyrant',
-]
-
 const BUILDERS: Record<EnemyVisualKind, () => THREE.Group> = {
   chaser: buildChaser,
   shooter: buildShooter,
@@ -283,6 +267,97 @@ const BUILDERS: Record<EnemyVisualKind, () => THREE.Group> = {
 }
 
 const BOSS_VISUALS = new Set<string>(['warden', 'caller', 'hex', 'choir', 'tyrant'])
+
+export type EnemyElemTint = 'flame' | 'orb' | 'aura' | 'chain' | 'star'
+
+export type EnemyFxState = {
+  boss: boolean
+  bossId?: string
+  slowed: boolean
+  frozen: boolean
+  amped: boolean
+  broken: boolean
+  weak: boolean
+  elem: EnemyElemTint | null
+  stacks: number
+}
+
+const ELEM_COLOR: Record<EnemyElemTint, number> = {
+  flame: 0xfb923c,
+  orb: 0xf97316,
+  aura: 0x38bdf8,
+  chain: 0xfacc15,
+  star: 0xa8a29e,
+}
+
+const BOSS_AURA: Record<string, number> = {
+  warden: 0x22d3ee,
+  caller: 0xc084fc,
+  hex: 0xa78bfa,
+  choir: 0xfbbf24,
+  tyrant: 0xf43f5e,
+}
+
+const statusRingGeo = new THREE.RingGeometry(0.38, 0.54, 28)
+const bossRingGeo = new THREE.RingGeometry(0.78, 1.18, 48)
+const bossFillGeo = new THREE.CircleGeometry(0.86, 32)
+const moteGeo = new THREE.SphereGeometry(0.065, 7, 7)
+
+function glowMat(color: number, opacity: number): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  })
+}
+
+type EnemyFxKit = {
+  root: THREE.Group
+  statusRing: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+  statusMotes: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[]
+  bossRing: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+  bossFill: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>
+}
+
+function createEnemyFxKit(): EnemyFxKit {
+  const root = new THREE.Group()
+  root.name = 'enemyFx'
+  const statusRing = new THREE.Mesh(statusRingGeo, glowMat(0x38bdf8, 0.55))
+  statusRing.rotation.x = -Math.PI / 2
+  statusRing.position.y = 0.05
+  statusRing.renderOrder = 2
+  root.add(statusRing)
+  const statusMotes: EnemyFxKit['statusMotes'] = []
+  for (let i = 0; i < 4; i++) {
+    const m = new THREE.Mesh(moteGeo, glowMat(0x38bdf8, 0.9))
+    m.renderOrder = 3
+    statusMotes.push(m)
+    root.add(m)
+  }
+  const bossFill = new THREE.Mesh(bossFillGeo, glowMat(0xf43f5e, 0.18))
+  bossFill.rotation.x = -Math.PI / 2
+  bossFill.position.y = 0.02
+  bossFill.renderOrder = 1
+  root.add(bossFill)
+  const bossRing = new THREE.Mesh(bossRingGeo, glowMat(0xf43f5e, 0.7))
+  bossRing.rotation.x = -Math.PI / 2
+  bossRing.position.y = 0.035
+  bossRing.renderOrder = 2
+  root.add(bossRing)
+  return { root, statusRing, statusMotes, bossRing, bossFill }
+}
+
+function statusTint(st: EnemyFxState): EnemyElemTint | null {
+  if (st.frozen) return 'aura'
+  if (st.amped) return 'chain'
+  if (st.broken) return 'flame'
+  if (st.weak) return 'star'
+  if (st.slowed) return 'aura'
+  return st.elem
+}
 
 export function resolveEnemyVisualKind(kind: string, bossId?: string | null): EnemyVisualKind {
   if (kind === 'boss') {
@@ -304,48 +379,99 @@ export function resolveEnemyVisualKind(kind: string, bossId?: string | null): En
   return 'chaser'
 }
 
-/** One pooled slot: all kind variants, show the active one. Feet at y=0, ~1–2 units tall. */
+/** One pooled slot: lazily clone the active kind. Feet at y=0, ~1–2 units tall. */
 export type EnemyModelSlot = {
   root: THREE.Group
-  variants: Record<EnemyVisualKind, THREE.Object3D>
+  variants: Partial<Record<EnemyVisualKind, THREE.Group>>
   kind: EnemyVisualKind | null
   flashing: boolean
+  flashKey: string
+  fx: EnemyFxKit
+}
+
+const _fitBox = new THREE.Box3()
+const _fitSize = new THREE.Vector3()
+
+function kindCastsShadow(k: EnemyVisualKind): boolean {
+  return k === 'elite' || BOSS_VISUALS.has(k)
+}
+
+function fitKindRoot(v: THREE.Group, k: EnemyVisualKind): void {
+  _fitBox.setFromObject(v)
+  _fitBox.getSize(_fitSize)
+  const targetH =
+    k === 'tyrant' || k === 'choir'
+      ? 1.55
+      : k === 'warden' || k === 'caller' || k === 'hex'
+        ? 1.45
+        : k === 'brute'
+          ? 1.15
+          : 1.1
+  const s = _fitSize.y > 1e-4 ? targetH / _fitSize.y : 1
+  v.scale.setScalar(s)
+  v.position.y = -_fitBox.min.y * s
+  const shadow = kindCastsShadow(k)
+  v.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return
+    o.castShadow = shadow
+    o.receiveShadow = false
+    o.userData.homeMat = o.material
+  })
 }
 
 export function createEnemyModelSlot(): EnemyModelSlot {
   const root = new THREE.Group()
   root.visible = false
-  const variants = {} as Record<EnemyVisualKind, THREE.Object3D>
-  for (const k of KINDS) {
-    const v = BUILDERS[k]()
-    v.visible = false
-    // Normalize roughly to ~1.1 unit tall so radius scaling stays familiar.
-    const box = new THREE.Box3().setFromObject(v)
-    const size = new THREE.Vector3()
-    box.getSize(size)
-    const targetH =
-      k === 'tyrant' || k === 'choir'
-        ? 1.55
-        : k === 'warden' || k === 'caller' || k === 'hex'
-          ? 1.45
-          : k === 'brute'
-            ? 1.15
-            : 1.1
-    const s = size.y > 1e-4 ? targetH / size.y : 1
-    v.scale.setScalar(s)
-    v.position.y = -box.min.y * s
-    variants[k] = v
-    root.add(v)
-  }
-  return { root, variants, kind: null, flashing: false }
+  const fx = createEnemyFxKit()
+  root.add(fx.root)
+  return { root, variants: {}, kind: null, flashing: false, flashKey: '', fx }
+}
+
+function variantHasRealMats(v: THREE.Object3D): boolean {
+  let ok = true
+  v.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return
+    if (!(o.material instanceof THREE.Material)) ok = false
+    const home = o.userData.homeMat
+    if (home != null && !(home instanceof THREE.Material)) ok = false
+  })
+  return ok
 }
 
 export function setEnemyModelKind(slot: EnemyModelSlot, kind: EnemyVisualKind): void {
-  if (slot.kind === kind) return
-  if (slot.kind) slot.variants[slot.kind].visible = false
-  slot.variants[kind].visible = true
-  slot.kind = kind
+  if (slot.kind === kind) {
+    const cur = slot.kind ? slot.variants[slot.kind] : undefined
+    if (cur && variantHasRealMats(cur)) return
+  }
+  if (slot.kind) {
+    const prev = slot.variants[slot.kind]
+    if (prev) {
+      if (slot.flashKey) {
+        prev.traverse((o) => {
+          if (!(o instanceof THREE.Mesh)) return
+          const home = o.userData.homeMat
+          if (home instanceof THREE.Material) o.material = home
+        })
+      }
+      prev.visible = false
+    }
+  }
   slot.flashing = false
+  slot.flashKey = ''
+  let v = slot.variants[kind]
+  if (v && !variantHasRealMats(v)) {
+    slot.root.remove(v)
+    delete slot.variants[kind]
+    v = undefined
+  }
+  if (!v) {
+    v = BUILDERS[kind]()
+    fitKindRoot(v, kind)
+    slot.variants[kind] = v
+    slot.root.add(v)
+  }
+  v.visible = true
+  slot.kind = kind
 }
 
 export function setEnemyModelFlash(
@@ -353,16 +479,71 @@ export function setEnemyModelFlash(
   flash: boolean,
   flashMat: THREE.Material,
 ): void {
-  if (!slot.kind || slot.flashing === flash) return
+  const key = flash ? flashMat.uuid : ''
+  if (!slot.kind || slot.flashKey === key) return
+  slot.flashKey = key
   slot.flashing = flash
   const v = slot.variants[slot.kind]
+  if (!v) return
   v.traverse((o) => {
     if (!(o instanceof THREE.Mesh)) return
     if (flash) {
-      if (!o.userData.homeMat) o.userData.homeMat = o.material
+      const home = o.userData.homeMat
+      if (!(home instanceof THREE.Material)) o.userData.homeMat = o.material
       o.material = flashMat
-    } else if (o.userData.homeMat) {
-      o.material = o.userData.homeMat as THREE.Material
+    } else {
+      const home = o.userData.homeMat
+      if (home instanceof THREE.Material) o.material = home
     }
   })
+}
+
+/** 叠层 1 起的异常光点 + Boss 脚下光环。chest 不画。 */
+export function syncEnemyFx(slot: EnemyModelSlot, st: EnemyFxState, t: number): void {
+  const fx = slot.fx
+  const chest = slot.kind === 'chest'
+  const proc = st.frozen || st.amped || st.broken || st.weak
+  const building = (st.stacks ?? 0) > 0 && !!st.elem
+  const statusOn = !chest && (st.slowed || proc || building)
+  const bossOn = !chest && st.boss
+  fx.root.visible = statusOn || bossOn
+
+  fx.bossRing.visible = bossOn
+  fx.bossFill.visible = bossOn
+  if (bossOn) {
+    const col = BOSS_AURA[st.bossId ?? ''] ?? BOSS_AURA.tyrant
+    fx.bossRing.material.color.setHex(col)
+    fx.bossFill.material.color.setHex(col)
+    const pulse = 0.5 + 0.5 * Math.sin(t * 2.6)
+    fx.bossRing.material.opacity = 0.42 + 0.38 * pulse
+    fx.bossFill.material.opacity = 0.1 + 0.12 * pulse
+    const s = 1 + 0.07 * pulse
+    fx.bossRing.scale.set(s, 1, s)
+    fx.bossFill.scale.set(s, 1, s)
+  }
+
+  const tint = statusTint(st)
+  fx.statusRing.visible = statusOn && !!tint
+  if (!statusOn || !tint) {
+    for (const m of fx.statusMotes) m.visible = false
+    return
+  }
+  const col = ELEM_COLOR[tint]
+  fx.statusRing.material.color.setHex(col)
+  fx.statusRing.material.opacity = proc ? 0.82 : st.slowed ? 0.68 : 0.32 + 0.16 * st.stacks
+  const n = proc ? 4 : st.slowed && !building ? 2 : Math.max(1, Math.min(4, st.stacks))
+  const spin = proc ? 3.4 : 2.15
+  const rad = 0.4 + (proc ? 0.14 : 0.05 * Math.max(1, st.stacks))
+  for (let i = 0; i < fx.statusMotes.length; i++) {
+    const m = fx.statusMotes[i]!
+    if (i >= n) {
+      m.visible = false
+      continue
+    }
+    m.visible = true
+    m.material.color.setHex(col)
+    m.material.opacity = proc ? 0.95 : 0.72
+    const a = t * spin + (i / n) * Math.PI * 2
+    m.position.set(Math.cos(a) * rad, 0.38 + 0.2 * (i / n) + 0.07 * Math.sin(t * 4.2 + i), Math.sin(a) * rad)
+  }
 }

@@ -39,11 +39,11 @@ walk(path.join(src, 'domain'), [
 
 walk(path.join(src, 'application'), [
   /from ['"][^'"]*wardrobe\/(catalog|session|preview|ui)/,
-  /from ['"][^'"]*figures\/(tka-jodi|skyrim-female)/,
+  /from ['"][^'"]*figures\/(tka-jodi|skyrim-female|procedural)/,
 ])
 
 walk(path.join(src, 'presentation'), [
-  /from ['"][^'"]*figures\/(tka-jodi|skyrim-female)/,
+  /from ['"][^'"]*figures\/(tka-jodi|skyrim-female|procedural)/,
 ])
 
 walk(path.join(src, 'figures', 'kernel'), [
@@ -51,12 +51,21 @@ walk(path.join(src, 'figures', 'kernel'), [
   /from ['"][^'"]*\/wardrobe\//,
   /from ['"][^'"]*\/tka-jodi/,
   /from ['"][^'"]*\/skyrim-female/,
+  /from ['"][^'"]*\/procedural/,
 ])
 
 walk(path.join(src, 'figures', 'skyrim-female'), [
   /from ['"][^'"]*\/presentation\//,
   /from ['"][^'"]*\/wardrobe\//,
   /from ['"][^'"]*\/tka-jodi/,
+  /from ['"][^'"]*\/procedural/,
+])
+
+walk(path.join(src, 'figures', 'procedural'), [
+  /from ['"][^'"]*\/presentation\//,
+  /from ['"][^'"]*\/wardrobe\//,
+  /from ['"][^'"]*\/tka-jodi/,
+  /from ['"][^'"]*\/skyrim-female/,
 ])
 
 const types = path.join(src, 'figures', 'types.ts')

@@ -1,6 +1,6 @@
 import type { AudioClockPort } from '../shared/ports'
 import { aabbOverlap, entityBox } from './math'
-import { damageEnemy, hurtPlayer, tickCraters, tickChains, tickSlashes } from './combat'
+import { damageEnemy, hurtPlayer, runMagicWave, tickCraters, tickChains, tickSlashes } from './combat'
 import { hitsObstacle } from './map'
 import { hitEffectForKind } from './status'
 import { outgoingMul } from './elemental'
@@ -39,6 +39,7 @@ export function tickProjectiles(w: World, dt: number, clock: AudioClockPort): vo
             special: hop > 0,
           },
         })
+        runMagicWave(w, clock, [e], { dmg: b.damage, originX: e.x, originZ: e.z })
         if (b.pierce > 0) b.pierce -= 1
         else b.life = 0
         break

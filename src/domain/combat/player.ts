@@ -8,7 +8,6 @@ import {
   tickAura,
   tickChain,
   tickFlame,
-  tickOrbit,
   tickStar,
 } from './combat'
 import { playerMoveMul, tickPlayerStatuses } from './status'
@@ -162,24 +161,21 @@ export function tickPlayerWeapons(w: World, dt: number, clock: AudioClockPort): 
   const target = nearestEnemy(w)
 
   const orb = L.orb
-  if (orb && w.player.fireCd <= 0) {
-    w.player.fireCd = orb.interval
-    let dx = 0
-    let dz = -1
-    if (target) {
+  if (orb && w.player.fireCd <= 0 && target) {
+    const reach = orb.speed * orb.life
+    const dist = Math.hypot(target.x - w.player.x, target.z - w.player.z)
+    if (dist <= reach + target.r) {
+      w.player.fireCd = orb.interval
       const d = norm(target.x - w.player.x, target.z - w.player.z)
-      dx = d.x
-      dz = d.z
+      const count = Math.max(1, orb.count + (L.spreadExtra > 0 ? L.spreadExtra * 2 : 0))
+      const spread = L.spreadExtra > 0 ? 0.35 + L.spreadExtra * 0.15 : 0
+      firePlayerPattern(w, d.x, d.z, count, spread, orb.damage * w.stats.mult, undefined, clock)
     }
-    const count = Math.max(1, orb.count + (L.spreadExtra > 0 ? L.spreadExtra * 2 : 0))
-    const spread = L.spreadExtra > 0 ? 0.35 + L.spreadExtra * 0.15 : 0
-    firePlayerPattern(w, dx, dz, count, spread, orb.damage * w.stats.mult, undefined, clock)
   }
 
   tickFlame(w, dt, clock)
   tickAura(w, dt, clock)
   tickChain(w, dt, clock)
   tickStar(w, dt, clock)
-  tickOrbit(w, dt, clock)
   tickPlayerStatuses(w, dt, clock)
 }

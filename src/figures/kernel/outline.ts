@@ -5,7 +5,7 @@ export type { AuraAudio }
 
 const HULL = 'outlineHull'
 const AURA_FX = 'ssjAuraFx'
-const AURA_VER = 23
+const AURA_VER = 24
 const WAVE_SEGS = 256
 
 let softDisc: THREE.CanvasTexture | null = null
@@ -356,27 +356,44 @@ function makeWaveRing(
   }
 }
 
-/** Per-segment level from FFT only — no synth / thrash. */
+/** Beat synth as the floor; FFT rides on top so the ring still breathes when silent. */
 function sampleWave(
   i: number,
   segs: number,
-  _phase: number,
-  _t: number,
-  _boost: number,
-  _impact: number,
+  phase: number,
+  t: number,
+  boost: number,
+  impact: number,
   c: WaveCoeffs,
   spectrum?: Float32Array,
 ): number {
-  if (!spectrum || spectrum.length === 0) return 0
-  const u = i / segs
-  const n = spectrum.length
-  const f = u * (n - 1)
-  const i0 = Math.floor(f)
-  const i1 = Math.min(n - 1, i0 + 1)
-  const fr = f - i0
-  const s = fr * fr * (3 - 2 * fr)
-  const audio = spectrum[i0]! * (1 - s) + spectrum[i1]! * s
-  return Math.pow(Math.max(0, audio), 0.82) * c.ampScale
+  const ang = (i / segs) * Math.PI * 2
+  const beat = 0.62 + 0.38 * Math.sin(phase * Math.PI * 2)
+  const synth =
+    c.baseH *
+    (0.75 + 0.55 * boost) *
+    beat *
+    (1 +
+      Math.sin(ang * c.f1 + phase * Math.PI * 2) * c.w1 +
+      Math.sin(ang * c.f2 + t * c.speedA * 0.12 + c.p2) * c.w2 +
+      Math.sin(ang * c.f3 + t * c.speedB * 0.08 + c.p3) * c.w3 +
+      Math.sin(ang * c.f4 + t * 2.1 + c.p4) * c.w4)
+  const thrash =
+    (Math.sin(t * c.speedA + i * c.stepA) * c.thrashA +
+      Math.sin(t * c.speedB + i * c.stepB) * c.thrashB) *
+    (0.32 + impact * 0.85)
+  let audio = 0
+  if (spectrum && spectrum.length > 0) {
+    const u = i / segs
+    const n = spectrum.length
+    const f = u * (n - 1)
+    const i0 = Math.floor(f)
+    const i1 = Math.min(n - 1, i0 + 1)
+    const fr = f - i0
+    const s = fr * fr * (3 - 2 * fr)
+    audio = Math.pow(Math.max(0, spectrum[i0]! * (1 - s) + spectrum[i1]! * s), 0.82) * c.ampScale
+  }
+  return Math.max(0, synth + thrash + audio * (0.9 + 0.35 * boost) + impact * 0.24)
 }
 
 function writeWave(
@@ -433,10 +450,10 @@ function spawnShock(shocks: Shock[], boost: number): void {
   const idle = shocks.find((s) => s.life >= s.max)
   if (!idle) return
   idle.life = 0
-  idle.max = 0.16 + 0.04 * Math.min(1.5, boost)
+  idle.max = 0.2 + 0.05 * Math.min(1.8, boost)
   idle.mesh.visible = true
-  idle.mesh.scale.setScalar(0.3)
-  ;(idle.mesh.material as THREE.MeshBasicMaterial).opacity = 0.95
+  idle.mesh.scale.setScalar(0.28)
+  ;(idle.mesh.material as THREE.MeshBasicMaterial).opacity = 1
 }
 
 function ensureAuraFx(root: THREE.Object3D): THREE.Group {
@@ -466,7 +483,7 @@ function ensureAuraFx(root: THREE.Object3D): THREE.Group {
     side: THREE.DoubleSide,
     fog: false,
   })
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 3.2), groundMat)
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(4.1, 4.1), groundMat)
   ground.name = 'ssjGround'
   ground.rotation.x = -Math.PI / 2
   ground.position.y = 0.02
@@ -483,7 +500,7 @@ function ensureAuraFx(root: THREE.Object3D): THREE.Group {
     fog: false,
     side: THREE.DoubleSide,
   })
-  const sigil = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.95), sigilMat)
+  const sigil = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 1.15), sigilMat)
   sigil.name = 'ssjSigil'
   sigil.rotation.x = -Math.PI / 2
   sigil.position.y = 0.045
@@ -516,10 +533,36 @@ function ensureAuraFx(root: THREE.Object3D): THREE.Group {
   fx.add(waveMain.group)
   fx.userData.waveMain = waveMain
 
+  const waveInner = makeWaveRing(0.46, 0.038, 0xffe8a3, 0.92, {
+    f1: 8,
+    f2: 5,
+    f3: 13,
+    f4: 3,
+    w1: 0.42,
+    w2: 0.3,
+    w3: 0.18,
+    w4: 0.12,
+    p2: 1.1,
+    p3: 0.4,
+    p4: 2.8,
+    thrashA: 0.22,
+    thrashB: 0.18,
+    speedA: 11,
+    speedB: 19,
+    stepA: 0.41,
+    stepB: 0.33,
+    ampScale: 0.9,
+    baseH: 0.11,
+  }, 2.2)
+  waveInner.group.name = 'waveInner'
+  for (const m of waveInner.meshes) m.position.y = 0.055
+  fx.add(waveInner.group)
+  fx.userData.waveInner = waveInner
+
   // rising mist strands
   const streak = streakTex()
   const rises: Rise[] = []
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 16; i++) {
     const mat = new THREE.MeshBasicMaterial({
       map: streak,
       color: 0xe0f2fe,
@@ -530,24 +573,43 @@ function ensureAuraFx(root: THREE.Object3D): THREE.Group {
       fog: false,
       side: THREE.DoubleSide,
     })
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.75), mat)
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 1.15), mat)
     mesh.visible = false
     mesh.renderOrder = -1
     fx.add(mesh)
     rises.push({
       mesh,
-      life: (i / 8) * 0.9,
+      life: (i / 16) * 0.9,
       max: 0.9,
-      ang: (i / 8) * Math.PI * 2,
-      radius: 0.4,
+      ang: (i / 16) * Math.PI * 2,
+      radius: 0.38,
       phase: i * 1.1,
     })
   }
   fx.userData.rises = rises
 
+  const pillars: THREE.Mesh[] = []
+  for (let i = 0; i < 6; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      map: streak,
+      color: 0xfff7ed,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+      side: THREE.DoubleSide,
+    })
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 2.05), mat)
+    mesh.renderOrder = -1
+    fx.add(mesh)
+    pillars.push(mesh)
+  }
+  fx.userData.pillars = pillars
+
   // fast expanding shock rings on beat
   const shocks: Shock[] = []
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 8; i++) {
     const mat = new THREE.MeshBasicMaterial({
       map: discTex(),
       color: 0xffffff,
@@ -572,6 +634,7 @@ function ensureAuraFx(root: THREE.Object3D): THREE.Group {
 
   root.add(fx)
   writeWave(waveMain, 0, 0, 1, 0)
+  writeWave(waveInner, 0, 0, 1, 0)
   return fx
 }
 
@@ -585,28 +648,48 @@ export function setAvatarOutline(
   color: number,
   width: number,
 ): void {
-  const boost = Math.max(0.55, Math.min(2.0, width / 0.014))
+  const boost = Math.max(0.55, Math.min(3.2, width / 0.014))
   const fx = ensureAuraFx(root)
   fx.userData.boost = boost
   fx.userData.color = color
   const hurt = color === 0xfb7185
+  const hex = hurt ? 0xfb7185 : color
 
-  const tintRing = (key: string, hex: number, op: number) => {
+  const tintRing = (key: string, ringHex: number, op: number) => {
     const ring = fx.userData[key] as WaveRing | undefined
     if (!ring) return
     ring.opacity = op
     for (const m of ring.meshes) {
       if (m.material instanceof THREE.MeshBasicMaterial) {
-        m.material.color.setHex(hex)
+        m.material.color.setHex(ringHex)
       }
     }
   }
-  tintRing('waveMain', hurt ? 0xfb7185 : 0xffffff, hurt ? 0.85 : 1)
+  tintRing('waveMain', hex, hurt ? 0.9 : 1)
+  tintRing('waveInner', hurt ? 0xfb7185 : 0xffe8a3, hurt ? 0.85 : 0.95)
+
+  const tintMeshes = (key: string, ringHex: number) => {
+    const list = fx.userData[key] as Array<{ mesh: THREE.Mesh } | THREE.Mesh> | undefined
+    if (!list) return
+    for (const item of list) {
+      const mesh = item instanceof THREE.Mesh ? item : item.mesh
+      if (mesh.material instanceof THREE.MeshBasicMaterial) {
+        mesh.material.color.setHex(ringHex)
+      }
+    }
+  }
+  tintMeshes('rises', hex)
+  tintMeshes('pillars', hex)
+  tintMeshes('shocks', hex)
 
   const ground = fx.getObjectByName('ssjGround') as THREE.Mesh | undefined
   if (ground?.material instanceof THREE.MeshBasicMaterial) {
-    ground.material.color.setHex(hurt ? 0xfb7185 : 0xffffff)
-    ground.material.opacity = 0.55 + 0.25 * boost
+    ground.material.color.setHex(hex)
+    ground.material.opacity = 0.62 + 0.28 * boost
+  }
+  const sigil = fx.getObjectByName('ssjSigil') as THREE.Mesh | undefined
+  if (sigil?.material instanceof THREE.MeshBasicMaterial) {
+    sigil.material.color.setHex(hex)
   }
 }
 
@@ -647,23 +730,25 @@ export function tickAvatarAura(
   const impact = Math.max(fx.userData.impact as number, bass * 0.55 + energy * 0.25)
 
   const waveMain = fx.userData.waveMain as WaveRing | undefined
-  const flash = 1 + impact * 0.35
-  if (waveMain) writeWave(waveMain, phase, t, boost, impact, spectrum, Math.min(1.25, flash))
+  const waveInner = fx.userData.waveInner as WaveRing | undefined
+  const flash = 1 + impact * 0.45
+  if (waveMain) writeWave(waveMain, phase, t, boost, impact, spectrum, Math.min(1.45, flash))
+  if (waveInner) writeWave(waveInner, phase + 0.5, t * 1.15, boost, impact, spectrum, Math.min(1.35, flash))
 
   const sigil = fx.getObjectByName('ssjSigil')
   if (sigil) {
-    sigil.rotation.z = 0
-    sigil.scale.setScalar(1 + impact * 0.28 * boost)
+    sigil.rotation.z = t * 0.35
+    sigil.scale.setScalar(1 + impact * 0.38 * boost)
     if (sigil instanceof THREE.Mesh && sigil.material instanceof THREE.MeshBasicMaterial) {
-      sigil.material.opacity = 0.8 + impact * 0.2
+      sigil.material.opacity = 0.82 + impact * 0.18
     }
   }
 
   const ground = fx.getObjectByName('ssjGround')
   if (ground) {
-    ground.scale.setScalar(1 + impact * 0.35 * boost)
+    ground.scale.setScalar(1 + impact * 0.42 * boost)
     if (ground instanceof THREE.Mesh && ground.material instanceof THREE.MeshBasicMaterial) {
-      ground.material.opacity = (0.5 + 0.25 * boost) * (0.75 + impact * 0.5)
+      ground.material.opacity = (0.55 + 0.28 * boost) * (0.78 + impact * 0.55)
     }
   }
 
@@ -676,10 +761,25 @@ export function tickAvatarAura(
       }
       s.life += dt
       const u = Math.min(1, s.life / s.max)
-      const r = 0.4 + u * (2.2 + 0.6 * boost)
+      const r = 0.45 + u * (2.8 + 0.85 * boost)
       s.mesh.visible = true
       s.mesh.scale.setScalar(r)
-      ;(s.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - u) * (0.85 + 0.15 * boost)
+      ;(s.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - u) * (0.95 + 0.2 * boost)
+    }
+  }
+
+  const pillars = fx.userData.pillars as THREE.Mesh[] | undefined
+  if (pillars) {
+    for (let i = 0; i < pillars.length; i++) {
+      const mesh = pillars[i]!
+      const a = (i / pillars.length) * Math.PI * 2 + t * 0.85
+      const rad = 0.26 + 0.08 * Math.sin(t * 3.2 + i)
+      mesh.visible = true
+      mesh.position.set(Math.cos(a) * rad, 0.85 + 0.12 * boost, Math.sin(a) * rad)
+      mesh.rotation.y = a
+      mesh.scale.set(1, 0.85 + 0.22 * boost + impact * 0.35, 1)
+      ;(mesh.material as THREE.MeshBasicMaterial).opacity =
+        (0.22 + 0.2 * boost + impact * 0.4) * (0.55 + 0.45 * Math.sin(t * 5 + i))
     }
   }
 
@@ -689,18 +789,18 @@ export function tickAvatarAura(
     s.life += dt
     if (s.life >= s.max) {
       s.life = 0
-      s.max = 0.22 + Math.random() * 0.2
+      s.max = 0.2 + Math.random() * 0.22
       s.ang = Math.random() * Math.PI * 2
-      s.radius = 0.35 + Math.random() * 0.4
+      s.radius = 0.28 + Math.random() * 0.42
       s.phase = Math.random() * Math.PI * 2
     }
     const u = s.life / s.max
-    const y = 0.1 + u * (1.35 + 0.4 * boost)
+    const y = 0.12 + u * (1.7 + 0.55 * boost)
     s.mesh.visible = true
     s.mesh.position.set(Math.cos(s.ang) * s.radius, y, Math.sin(s.ang) * s.radius)
     s.mesh.rotation.y = s.ang + Math.PI * 0.5
     const fade = u < 0.08 ? u / 0.08 : u > 0.55 ? (1 - u) / 0.45 : 1
     ;(s.mesh.material as THREE.MeshBasicMaterial).opacity =
-      fade * (0.5 + 0.3 * boost + impact * 0.35)
+      fade * (0.58 + 0.32 * boost + impact * 0.4)
   }
 }

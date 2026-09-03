@@ -67,27 +67,18 @@ def pick_idle(recs: list) -> list:
 def convert_xwm(xwm: Path, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     ffmpeg = find_ffmpeg()
-    if ffmpeg:
-        r = subprocess.run(
-            [ffmpeg, "-y", "-i", str(xwm), "-c:a", "libvorbis", "-q:a", "4", str(dest)],
-            capture_output=True,
-            text=True,
+    if not ffmpeg:
+        raise SystemExit(
+            "need ffmpeg to decode Skyrim xWMA (Windows Media Foundation cannot). "
+            "Install ffmpeg, or wait until tools/skyrim-import/.cache/ffmpeg has ffmpeg.exe, then rerun."
         )
-        if r.returncode != 0:
-            raise SystemExit(f"ffmpeg {xwm.name}: {r.stderr[-400:]}")
-        return
-    wma = xwm.with_suffix(".wma")
-    shutil.copyfile(xwm, wma)
-    proj = Path(__file__).resolve().parent / "fuz2wav"
-    wav = dest.with_suffix(".wav")
     r = subprocess.run(
-        ["dotnet", "run", "--project", str(proj), "--", str(wma), str(wav)],
+        [ffmpeg, "-y", "-i", str(xwm), "-c:a", "libvorbis", "-q:a", "4", str(dest)],
         capture_output=True,
+        text=True,
     )
     if r.returncode != 0:
-        err = (r.stderr or b"").decode("utf-8", "replace")[-800:]
-        out = (r.stdout or b"").decode("utf-8", "replace")[-400:]
-        raise SystemExit(f"fuz2wav {xwm.name}: {out}\n{err}")
+        raise SystemExit(f"ffmpeg {xwm.name}: {r.stderr[-400:]}")
 
 
 def main() -> None:
@@ -112,7 +103,8 @@ def main() -> None:
         files.append(f"{stem}{ext}")
         print("ok", stem, name)
     lines = {
-        k: list(files) for k in ("kill", "kill_elite", "kill_boss", "fever", "wave_start", "wave_clear")
+        k: list(files)
+        for k in ("kill", "kill_elite", "kill_boss", "fever", "wave_start", "wave_clear", "idle")
     }
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     CATALOG.write_text(json.dumps({"lines": lines}, indent=2), encoding="utf-8")

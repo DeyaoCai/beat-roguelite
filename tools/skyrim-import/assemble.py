@@ -23,6 +23,7 @@ from sky_nif import (
 )
 from sky_scene import (
     armatures,
+    bake_facegen_to_head_bone,
     drop_helpers,
     dump_scene,
     join_to_master,
@@ -37,12 +38,16 @@ def main() -> None:
     job_path = os.path.abspath(argv_job())
     job_dir = os.path.dirname(job_path)
     job = load_job(job_path)
-    repo = os.path.abspath(os.path.join(job_dir, "..", ".."))
+    repo = os.path.abspath(os.path.join(_here, "..", ".."))
     os.chdir(repo)
+    mod_root = job.get("modRoot") or ""
+    if mod_root and not os.path.isabs(mod_root):
+        mod_root = os.path.normpath(os.path.join(repo, mod_root))
 
     roots = [
         job.get("gameData") or "",
         job.get("mo2Mods") or "",
+        mod_root,
         repo,
         job_dir,
     ]
@@ -114,6 +119,10 @@ def main() -> None:
 
     parent_skins_to_armature(master)
     drop_helpers()
+    # ESP/engine attach: facegeom is head-local; bake NPC Head rest from skeleton.
+    baked = bake_facegen_to_head_bone(master)
+    if baked:
+        print("facegen baked to head bone", baked)
 
     skel_hkx = resolve(job_dir, roots, job.get("skeletonHkx") or "")
     gaits = job.get("gaits") or {}
@@ -141,18 +150,25 @@ def main() -> None:
             has_walk = True
 
     push_nla(master)
-    head_nif = resolve(job_dir, roots, job.get("head") or "")
-    head_dds = ""
-    if head_nif:
-        cand = os.path.splitext(head_nif)[0] + ".dds"
-        if os.path.isfile(cand):
-            head_dds = cand
-    flatten_skin_materials(tex_roots, prefer={"head": head_dds} if head_dds else None)
+    head_diffuse = resolve(job_dir, roots, job.get("headDiffuse") or "") or ""
+    head_tint = resolve(job_dir, roots, job.get("headTint") or "") or ""
+    flatten_skin_materials(
+        tex_roots,
+        head_diffuse=head_diffuse or None,
+        head_tint=head_tint or None,
+    )
 
-    out_rel = (job.get("out") or "public/figures/skyrim-female/models/body.glb").replace("\\", "/")
+    out_rel = (job.get("out") or "../co_der-resource/beat-roguelite/figures/skyrim-female/models/body.glb").replace("\\", "/")
     out = out_rel if os.path.isabs(out_rel) else os.path.normpath(os.path.join(repo, out_rel))
     export_glb(out)
-    write_figure_json(out, has_idle, has_walk)
+    write_figure_json(
+        out,
+        has_idle,
+        has_walk,
+        pack_id=job.get("id") or "",
+        caption=job.get("caption") or "",
+        voices=job.get("voices") or "",
+    )
     print("wrote", out)
 
 

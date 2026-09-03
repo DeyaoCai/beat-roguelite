@@ -1,6 +1,7 @@
 import type { FrameSnapshot } from './types'
 import { highwayLayout } from './highwayLayout'
 import { playCamLayout, type PlayCamLayout } from './playPortrait'
+import { drawHudIcon, iconForId, inkForId } from './hudIcons'
 
 const FONT = 'Segoe UI, PingFang SC, Microsoft YaHei, sans-serif'
 const FEVER_END_WARN_SEC = 2.2
@@ -44,17 +45,22 @@ export function drawPlayHud(
   h: number,
   snap: FrameSnapshot,
 ): void {
+  const now = performance.now()
+  const dt = Math.min(0.05, (now - hudFxT) / 1000)
+
   drawHurtVignette(ctx, w, h, snap.player.hurtFlash)
   drawFeverFlash(ctx, w, h, snap)
 
   const lay = playCamLayout(w, h, snap)
   drawVitals(ctx, lay, snap)
+  drawTally(ctx, lay, snap, dt)
 
   const midOffer =
     !!snap.offer && snap.pickReason != null && snap.pickReason !== 'wave'
   if (!midOffer) drawRun(ctx, w, snap)
 
   drawKit(ctx, lay.panel.x, h, snap)
+  drawUpgradePanel(ctx, w, h, lay, snap)
   drawRailChrome(ctx, w, h, snap)
   drawBossBar(ctx, w, h, snap)
   drawLevelUp(ctx, w, h, snap)
@@ -174,7 +180,6 @@ function drawVitals(ctx: CanvasRenderingContext2D, lay: PlayCamLayout, snap: Fra
   cy += 18
 
   let sx = x
-  sx += drawMiniPill(ctx, sx, cy - 8, `金 ${snap.gold}`, 'rgba(42, 32, 12, 0.9)', '#fbbf24') + 6
   sx += drawMiniPill(ctx, sx, cy - 8, `幸 ${snap.luck}`, 'rgba(42, 24, 10, 0.9)', '#e8a04a') + 6
   if (snap.armorDr > 0) {
     sx += drawMiniPill(ctx, sx, cy - 8, `甲 ${Math.round(snap.armorDr * 100)}%`, 'rgba(22, 14, 10, 0.9)', '#d4c4b0') + 6
@@ -185,10 +190,73 @@ function drawVitals(ctx: CanvasRenderingContext2D, lay: PlayCamLayout, snap: Fra
   if (snap.carapaceStacks > 0) {
     drawMiniPill(ctx, sx, cy - 8, `壳 ${snap.carapaceStacks}`, 'rgba(42, 24, 12, 0.9)', '#fdba74')
   }
-  ctx.fillStyle = '#d4c4b0'
-  ctx.font = `700 12px ${FONT}`
-  ctx.textAlign = 'right'
-  ctx.fillText(`${snap.score}`, rightX, cy + 2)
+}
+
+type TallyMeter = { target: number; shown: number; pop: number }
+
+const tallyMeters: Record<string, TallyMeter> = {}
+
+function stepTally(id: string, value: number, dt: number): TallyMeter {
+  const v = Math.max(0, value)
+  let m = tallyMeters[id]
+  if (!m) {
+    m = { target: v, shown: v, pop: 0 }
+    tallyMeters[id] = m
+    return m
+  }
+  if (v > m.target + 0.01) m.pop = 1
+  else if (v < m.target - 0.01) {
+    m.shown = v
+    m.pop = 0
+  }
+  m.target = v
+  const k = 1 - Math.exp(-16 * dt)
+  m.shown += (m.target - m.shown) * k
+  if (Math.abs(m.target - m.shown) < 0.2) m.shown = m.target
+  m.pop = Math.max(0, m.pop - dt * 3.4)
+  return m
+}
+
+function drawTally(
+  ctx: CanvasRenderingContext2D,
+  lay: PlayCamLayout,
+  snap: FrameSnapshot,
+  dt: number,
+) {
+  const rows: { id: string; label: string; value: number; ink: string }[] = [
+    { id: 'gold', label: '金币', value: snap.gold, ink: '#fbbf24' },
+    { id: 'kills', label: '击杀', value: snap.kills, ink: '#fda4af' },
+    { id: 'score', label: '得分', value: snap.score, ink: '#f3ead8' },
+  ]
+  const x = lay.panel.x
+  const w = Math.min(176, lay.panel.w)
+  const rowH = 34
+  const pad = 10
+  const y0 = lay.panel.y + lay.panel.h + 10
+  const h = pad * 2 + rows.length * rowH
+  paintPanel(ctx, x, y0, w, h)
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!
+    const m = stepTally(row.id, row.value, dt)
+    const cy = y0 + pad + i * rowH + 22
+    ctx.fillStyle = '#b8a894'
+    ctx.font = `700 11px ${FONT}`
+    ctx.textAlign = 'left'
+    ctx.fillText(row.label, x + 12, cy)
+
+    const bounce = Math.sin(m.pop * Math.PI)
+    const scale = 1 + 0.42 * bounce
+    const lift = -9 * bounce
+    ctx.save()
+    ctx.translate(x + w - 14, cy + lift)
+    ctx.scale(scale, scale)
+    ctx.textAlign = 'right'
+    ctx.font = `800 20px ${FONT}`
+    ctx.fillStyle = bounce > 0.08 ? '#fff7ed' : row.ink
+    ctx.fillText(`${Math.round(m.shown)}`, 0, 0)
+    ctx.restore()
+  }
   ctx.textAlign = 'left'
 }
 
@@ -198,29 +266,36 @@ function drawRun(ctx: CanvasRenderingContext2D, w: number, snap: FrameSnapshot) 
   const y = 14
   const inner = 12
   const threat = snap.eliteAlive || snap.bossAlive
-  const panelH = threat ? 98 : 82
+  const hasNext = !!snap.weatherNextName
+  const panelH = (threat ? 108 : 92) + (hasNext ? 16 : 0)
   paintPanel(ctx, x, y, colW, panelH, threat ? 'rgba(251, 113, 133, 0.45)' : 'rgba(232, 160, 74, 0.32)', threat ? '#fb7185' : '#e8a04a')
 
+  const waveLabel = snap.runMode === 'endless' ? `WAVE ${snap.wave}` : `WAVE ${snap.wave} / 5`
   ctx.textAlign = 'left'
   ctx.fillStyle = '#e8a04a'
   ctx.font = `700 10px ${FONT}`
-  ctx.fillText('WAVE', x + inner, y + inner + 8)
+  ctx.fillText('天气', x + inner, y + inner + 8)
+  ctx.textAlign = 'right'
+  ctx.fillStyle = '#b8a894'
+  ctx.fillText(waveLabel, x + colW - inner, y + inner + 8)
+
+  ctx.textAlign = 'left'
   ctx.fillStyle = '#f3ead8'
   ctx.font = `700 15px ${FONT}`
-  ctx.fillText(
-    snap.runMode === 'endless' ? `${snap.wave}` : `${snap.wave} / 5`,
-    x + inner,
-    y + inner + 26,
-  )
+  ctx.fillText(snap.weatherName || '晴', x + inner, y + inner + 26)
+
   ctx.fillStyle = '#c9a882'
   ctx.font = `11px ${FONT}`
-  ctx.fillText(snap.weatherName || '晴', x + inner, y + inner + 42)
-  ctx.fillStyle = '#b8a894'
-  ctx.font = `11px ${FONT}`
-  ctx.textAlign = 'right'
-  ctx.fillText(`击杀 ${snap.kills}`, x + colW - inner, y + inner + 26)
-  ctx.textAlign = 'left'
-  drawBar(ctx, x + inner, y + inner + 50, colW - inner * 2, 5, snap.waveProgress, '#e8a04a')
+  const blurb = snap.weatherBlurb || ''
+  if (blurb) ctx.fillText(blurb, x + inner, y + inner + 42, colW - inner * 2)
+  let barY = y + inner + 50
+  if (hasNext) {
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = `10px ${FONT}`
+    ctx.fillText(`接着 ${snap.weatherNextName}`, x + inner, y + inner + 56, colW - inner * 2)
+    barY = y + inner + 64
+  }
+  drawBar(ctx, x + inner, barY, colW - inner * 2, 5, snap.waveProgress, '#e8a04a')
 
   if (threat) {
     let tx = x + inner
@@ -237,54 +312,53 @@ function drawKit(
   snap: FrameSnapshot,
 ) {
   const slotW = 56
-  const slotH = 50
+  const slotH = 52
   const gap = 8
   const weapons = snap.weapons
-  const n = Math.max(1, weapons.length)
-  const kitW = n * slotW + (n - 1) * gap
   const y = h - 78
   for (let i = 0; i < weapons.length; i++) {
     const wp = weapons[i]!
     const x = left + i * (slotW + gap)
+    const icon = wp.locked ? 'lock' : wp.empty ? 'empty' : iconForId(wp.id)
+    const ink = wp.locked
+      ? '#64748b'
+      : wp.empty
+        ? '#94a3b8'
+        : inkForId(wp.id)
     paintPanel(
       ctx,
       x,
       y,
       slotW,
       slotH,
-      wp.empty
-        ? 'rgba(100, 116, 139, 0.25)'
-        : wp.beat
-          ? 'rgba(253, 224, 71, 0.7)'
-          : 'rgba(232, 160, 74, 0.28)',
-      wp.empty ? '#64748b' : wp.beat ? '#fde047' : '#e8a04a',
+      wp.locked
+        ? 'rgba(100, 116, 139, 0.18)'
+        : wp.empty
+          ? 'rgba(100, 116, 139, 0.25)'
+          : wp.beat
+            ? 'rgba(253, 224, 71, 0.7)'
+            : `${ink}55`,
+      wp.locked ? '#64748b' : wp.empty ? '#64748b' : wp.beat ? '#fde047' : ink,
     )
-    const cd = wp.empty ? 0 : (wp.cd ?? 0)
+    const cx = x + slotW / 2
+    const cy = y + slotH / 2
+    ctx.save()
+    roundRect(ctx, x + 3, y + 3, slotW - 6, slotH - 6, 8)
+    ctx.clip()
+    drawHudIcon(ctx, icon, cx, cy, 30, ink)
+    const cd = wp.empty || wp.locked ? 0 : (wp.cd ?? 0)
     if (cd > 0.02) {
-      const cx = x + slotW / 2
-      const cy = y + slotH / 2
-      const r = Math.min(slotW, slotH) * 0.42
-      ctx.beginPath()
-      ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + cd * Math.PI * 2)
-      ctx.strokeStyle = wp.beat ? 'rgba(253, 224, 71, 0.85)' : 'rgba(248, 250, 252, 0.55)'
-      ctx.lineWidth = 3
-      ctx.stroke()
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.35)'
+      ctx.fillStyle = 'rgba(12, 8, 6, 0.38)'
       ctx.beginPath()
       ctx.moveTo(cx, cy)
-      ctx.arc(cx, cy, r - 1, -Math.PI / 2, -Math.PI / 2 + cd * Math.PI * 2)
+      ctx.arc(cx, cy, slotW, -Math.PI / 2, -Math.PI / 2 + cd * Math.PI * 2)
       ctx.closePath()
       ctx.fill()
     }
-    ctx.textAlign = 'center'
-    ctx.fillStyle = wp.empty ? '#94a3b8' : wp.beat ? '#fde047' : '#f3ead8'
-    ctx.font = `700 16px ${FONT}`
-    ctx.fillText(wp.glyph, x + slotW / 2, y + 24)
-    ctx.font = `600 10px ${FONT}`
-    ctx.fillStyle = wp.empty ? '#64748b' : wp.beat ? '#fef9c3' : '#b8a894'
-    ctx.fillText(wp.name, x + slotW / 2, y + 40)
+    ctx.restore()
     if (wp.beat) {
       ctx.font = `700 9px ${FONT}`
+      ctx.textAlign = 'center'
       const tw = ctx.measureText('拍').width + 8
       ctx.fillStyle = 'rgba(253, 224, 71, 0.22)'
       roundRect(ctx, x + slotW - tw - 4, y + 4, tw, 12, 6)
@@ -294,36 +368,226 @@ function drawKit(
     }
   }
   ctx.textAlign = 'left'
+}
 
-  const chips = snap.upgrades
-  if (!chips.length) return
-  const chipY = y - 26
-  let cx = left
-  const maxX = left + Math.max(kitW, 268)
-  let drawn = 0
-  for (const u of chips) {
-    ctx.font = `600 11px ${FONT}`
-    const tw = ctx.measureText(u.label).width + 14
-    if (cx + tw > maxX || drawn >= 8) break
-    const special = u.kind === 'special'
-    ctx.fillStyle = special ? 'rgba(42, 32, 12, 0.85)' : 'rgba(28, 18, 12, 0.8)'
-    ctx.strokeStyle = special ? 'rgba(251, 191, 36, 0.7)' : 'rgba(232, 160, 74, 0.45)'
-    ctx.lineWidth = 1
-    roundRect(ctx, cx, chipY, tw, 20, 10)
+type UpgradeTone = 'fuse' | 'boost' | 'spec' | 'elem' | 'relic' | 'rhythm' | 'stat'
+
+type UpgradeRow = {
+  id: string
+  text: string
+  tag: string
+  tone: UpgradeTone
+  n: number
+}
+
+const TONE_ORDER: Record<UpgradeTone, number> = {
+  fuse: 0,
+  boost: 1,
+  spec: 2,
+  elem: 3,
+  relic: 4,
+  rhythm: 5,
+  stat: 6,
+}
+
+const TONE: Record<UpgradeTone, { fg: string; tag: string; bar: string }> = {
+  fuse: { fg: '#fde68a', tag: '#fbbf24', bar: 'rgba(251, 191, 36, 0.9)' },
+  boost: { fg: '#fed7aa', tag: '#fb923c', bar: 'rgba(251, 146, 60, 0.8)' },
+  spec: { fg: '#fde8c8', tag: '#e8a04a', bar: 'rgba(232, 160, 74, 0.75)' },
+  elem: { fg: '#e0f2fe', tag: '#7dd3fc', bar: 'rgba(125, 211, 252, 0.75)' },
+  relic: { fg: '#f5d0fe', tag: '#e879f9', bar: 'rgba(232, 121, 249, 0.7)' },
+  rhythm: { fg: '#fef08a', tag: '#facc15', bar: 'rgba(250, 204, 21, 0.75)' },
+  stat: { fg: '#e8ddd0', tag: '#b8a894', bar: 'rgba(184, 168, 148, 0.45)' },
+}
+
+function compactLabel(raw: string): string {
+  return raw
+    .replace(/^专精 · /, '')
+    .replace(/^融合 · /, '')
+    .replace(/^灌注 · /, '')
+    .replace(/^习得 · /, '')
+    .replace(/^闪避几率/, '闪避')
+    .replace(/^热度上限/, '热上限')
+    .replace(/^拍点加码/, '拍点')
+    .replace(/^施法范围/, '范围')
+    .replace(/^施法距离/, '距离')
+    .replace(/^护甲成长/, '甲成长')
+}
+
+function stackText(label: string, n: number): string {
+  const base = compactLabel(label).replace(/\s+[IVX]+$/, '').trim()
+  return n > 1 ? `${base} ×${n}` : compactLabel(label)
+}
+
+function upgradeRows(snap: FrameSnapshot): UpgradeRow[] {
+  const merged = new Map<string, UpgradeRow & { n: number; label: string }>()
+  for (const u of snap.upgrades) {
+    const id = u.id
+    let tag = ''
+    let tone: UpgradeTone = u.kind === 'special' ? 'spec' : 'stat'
+    if (id.startsWith('fuse_')) {
+      tag = '融'
+      tone = 'fuse'
+    } else if (id.startsWith('spell_')) {
+      tag = '灌'
+      tone = 'boost'
+    } else if (id.startsWith('elem_')) {
+      tag = '元'
+      tone = 'elem'
+    } else if (id.startsWith('relic_')) {
+      tag = '遗'
+      tone = 'relic'
+    } else if (id.startsWith('rhythm_') || id === 'beat_bonus') {
+      tag = '拍'
+      tone = 'rhythm'
+    } else if (id === 'heat_cap' || id === 'heat_decay') {
+      tag = '热'
+      tone = 'stat'
+    } else if (u.kind === 'special') {
+      tag = '专'
+      tone = 'spec'
+    }
+    const prev = merged.get(id)
+    if (prev) {
+      prev.n += 1
+      prev.text = stackText(prev.label, prev.n)
+      continue
+    }
+    merged.set(id, { id, text: compactLabel(u.label), tag, tone, n: 1, label: u.label })
+  }
+  const rows = [...merged.values()]
+  rows.sort((a, b) => TONE_ORDER[a.tone] - TONE_ORDER[b.tone])
+  return rows
+}
+
+function fuseNeedLines(f: FrameSnapshot['fuse']): { fuse: string; magic: string | null } {
+  if (f.fused >= 5) return { fuse: '已融满', magic: null }
+  if (f.fused > 0) return { fuse: `已融 ${f.fused} · 关末再融`, magic: null }
+  return { fuse: '关末三选融合', magic: null }
+}
+
+function drawFuseBlock(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  panelW: number,
+  inset: number,
+  f: FrameSnapshot['fuse'],
+): number {
+  const barY = y + 28
+  const innerL = x + inset + 4
+  const innerR = x + panelW - inset
+  const innerW = innerR - innerL
+  const lines = fuseNeedLines(f)
+
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#e8a04a'
+  ctx.font = `700 10px ${FONT}`
+  drawHudIcon(ctx, iconForId(f.mainId), innerL + 7, y + 10, 14, inkForId(f.mainId))
+  ctx.fillText('融合', innerL + 18, y + 14)
+  ctx.textAlign = 'right'
+  ctx.fillStyle = '#b8a894'
+  ctx.fillText(f.fused > 0 ? `已 ${f.fused}` : '未融', innerR, y + 14)
+
+  ctx.textAlign = 'right'
+  ctx.fillStyle = f.mainNeed === 0 ? '#fde68a' : '#c9a882'
+  ctx.font = `700 11px ${FONT}`
+  ctx.fillText(`${f.mainLv} / ${f.nextAt}`, innerR, y + 26)
+
+  drawBar(ctx, innerL, barY, innerW, 5, f.progress, f.mainNeed === 0 ? '#fbbf24' : '#e8a04a')
+
+  ctx.textAlign = 'left'
+  ctx.fillStyle = f.mainNeed === 0 && !f.eatName ? '#fda4af' : '#e8ddd0'
+  ctx.font = `600 10px ${FONT}`
+  ctx.fillText(lines.fuse, innerL, barY + 15, innerW)
+  if (lines.magic) {
+    ctx.fillStyle = '#c9a882'
+    ctx.fillText(lines.magic, innerL, barY + 27, innerW)
+  }
+  ctx.textAlign = 'left'
+  return lines.magic ? 62 : 50
+}
+
+function drawUpgradePanel(
+  ctx: CanvasRenderingContext2D,
+  _w: number,
+  _h: number,
+  lay: PlayCamLayout,
+  snap: FrameSnapshot,
+) {
+  const rows = upgradeRows(snap)
+  const well = lay.featured === 'full' ? lay.full : lay.bust
+  if (well.w < 8) return
+
+  const midOffer =
+    !!snap.offer && snap.pickReason != null && snap.pickReason !== 'wave'
+  const runH = snap.eliteAlive || snap.bossAlive ? 108 : 92
+  const topClear = midOffer ? 24 : 14 + runH + 8
+  const panelW = well.w
+  const x = well.x
+  const fuseH = fuseNeedLines(snap.fuse).magic ? 62 : 50
+  const listHead = rows.length ? 18 : 0
+  const cell = 26
+  const gapI = 4
+  const inset = 8
+  const innerW = panelW - inset * 2 - 4
+  const cols = Math.max(1, Math.floor((innerW + gapI) / (cell + gapI)))
+  const iconRows = rows.length ? Math.ceil(rows.length / cols) : 0
+  const listH = rows.length ? listHead + iconRows * (cell + gapI) + 6 : 0
+  const wantH = 8 + fuseH + (rows.length ? 6 : 0) + listH
+  const maxH = Math.max(fuseH + 16, well.y - 8 - topClear)
+  const panelH = Math.min(wantH, maxH)
+  const y = well.y - 8 - panelH
+  if (panelH < fuseH || y < 8) return
+
+  paintPanel(ctx, x, y, panelW, panelH, 'rgba(232, 160, 74, 0.34)', '#e8a04a')
+  drawFuseBlock(ctx, x, y + 4, panelW, inset, snap.fuse)
+
+  if (!rows.length) return
+
+  ctx.strokeStyle = 'rgba(180, 140, 90, 0.22)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(x + inset, y + 4 + fuseH)
+  ctx.lineTo(x + panelW - inset, y + 4 + fuseH)
+  ctx.stroke()
+
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#e8a04a'
+  ctx.font = `700 10px ${FONT}`
+  ctx.fillText('强化', x + inset + 4, y + 4 + fuseH + 14)
+
+  const originX = x + inset + 4
+  const cy = y + 4 + fuseH + listHead
+  const bottom = y + panelH - 4
+  let shown = 0
+  for (let i = 0; i < rows.length; i++) {
+    const col = i % cols
+    const row = Math.floor(i / cols)
+    const lx = originX + col * (cell + gapI)
+    const ly = cy + row * (cell + gapI)
+    if (ly + cell > bottom) break
+    const item = rows[i]!
+    const pal = TONE[item.tone]
+    ctx.fillStyle = 'rgba(0,0,0,0.22)'
+    roundRect(ctx, lx, ly, cell, cell, 6)
     ctx.fill()
-    ctx.stroke()
-    ctx.fillStyle = special ? '#fde68a' : '#f3ead8'
-    ctx.textAlign = 'center'
-    ctx.fillText(u.label, cx + tw / 2, chipY + 14)
-    cx += tw + 6
-    drawn++
+    drawHudIcon(ctx, iconForId(item.id), lx + cell / 2, ly + cell / 2, 18, inkForId(item.id, pal.fg))
+    if (item.n > 1) {
+      ctx.font = `700 9px ${FONT}`
+      ctx.textAlign = 'right'
+      ctx.fillStyle = pal.tag
+      ctx.fillText(`×${item.n}`, lx + cell - 2, ly + cell - 3)
+      ctx.textAlign = 'left'
+    }
+    shown++
   }
-  if (chips.length > drawn) {
-    ctx.textAlign = 'left'
-    ctx.fillStyle = '#b8a894'
-    ctx.font = `11px ${FONT}`
-    ctx.fillText(`+${chips.length - drawn}`, cx, chipY + 14)
-  }
+
+  const hidden = rows.length - shown
+  ctx.font = `700 10px ${FONT}`
+  ctx.textAlign = 'right'
+  ctx.fillStyle = hidden > 0 ? '#c9a882' : '#b8a894'
+  ctx.fillText(hidden > 0 ? `+${hidden}` : `${rows.length}`, x + panelW - inset, y + 4 + fuseH + 14)
   ctx.textAlign = 'left'
 }
 

@@ -1,5 +1,11 @@
 import type { BlessingId, ContractId } from '../../content/meta'
 import { CONTRACTS } from '../../content/meta'
+import {
+  BLESSING_COMBAT,
+  CONTRACT_COMBAT,
+  SHOP_STACKS,
+} from '../../content/rules'
+import { fuseIdForOffhand, type FuseUpgradeId } from '../../content/fusions'
 import type { StarterId } from '../../content/weapons'
 import { starterLabel } from '../../content/weapons'
 import type { UpgradeId } from './upgrades'
@@ -12,8 +18,8 @@ export function settleRunGold(
   contracts: readonly ContractId[] = [],
 ): number {
   const g = Math.max(0, Math.floor(runGold))
-  let bank = won ? g : Math.floor(g * 0.5)
-  if (blessing === 'goldfinger') bank = Math.floor(bank * 1.5)
+  let bank = won ? g : Math.floor(g * BLESSING_COMBAT.lossBankFrac)
+  if (blessing === 'goldfinger') bank = Math.floor(bank * BLESSING_COMBAT.goldfingerBankMul)
   bank = Math.floor(bank * contractBankMul(contracts))
   return bank
 }
@@ -54,7 +60,6 @@ const LEARN_BY_STARTER: Record<StarterId, UpgradeId> = {
   ward_aura: 'learn_aura',
   thunder_chain: 'learn_chain',
   starfall: 'learn_star',
-  orbit: 'learn_orbit',
 }
 
 const STARTER_BY_LEARN: Record<string, StarterId> = {
@@ -63,7 +68,6 @@ const STARTER_BY_LEARN: Record<string, StarterId> = {
   learn_aura: 'ward_aura',
   learn_chain: 'thunder_chain',
   learn_star: 'starfall',
-  learn_orbit: 'orbit',
 }
 
 const ALL_LEARNS: UpgradeId[] = [
@@ -72,7 +76,6 @@ const ALL_LEARNS: UpgradeId[] = [
   'learn_aura',
   'learn_chain',
   'learn_star',
-  'learn_orbit',
 ]
 
 export function duoLearnPool(starter: StarterId): UpgradeId[] {
@@ -106,22 +109,92 @@ export function ensureDuoLearn(starter: StarterId, current: UpgradeId | null): U
   return pool[0] ?? 'learn_orb'
 }
 
-/** Extra weapon to learn for 双修 (never the starter). */
+/** 商店开局融合层数。最多四门（除主手外全融）。 */
+export function startFuseNeed(shopStacks: number): number {
+  return Math.min(SHOP_STACKS.startFuseMax, Math.max(0, shopStacks))
+}
+
+export function ensureStartFuses(
+  starter: StarterId,
+  selected: readonly UpgradeId[],
+  need: number,
+): UpgradeId[] {
+  if (need <= 0) return []
+  const pool = duoLearnPool(starter)
+  const out: UpgradeId[] = []
+  for (const id of selected) {
+    if (!pool.includes(id) || out.includes(id)) continue
+    out.push(id)
+    if (out.length >= need) return out
+  }
+  for (const id of pool) {
+    if (out.includes(id)) continue
+    out.push(id)
+    if (out.length >= need) break
+  }
+  return out
+}
+
+export function cycleStartFuseCursor(
+  starter: StarterId,
+  cursor: UpgradeId | null,
+  dir: 1 | -1,
+): UpgradeId {
+  return cycleDuoLearn(starter, cursor, dir)
+}
+
+/** 勾选 / 取消一门；超出 need 时挤掉最早那门。 */
+export function toggleStartFuse(
+  starter: StarterId,
+  selected: readonly UpgradeId[],
+  learnId: UpgradeId,
+  need: number,
+): UpgradeId[] {
+  const pool = duoLearnPool(starter)
+  if (need <= 0 || !pool.includes(learnId)) return ensureStartFuses(starter, selected, need)
+  const kept = selected.filter((id) => pool.includes(id) && id !== learnId)
+  if (selected.includes(learnId)) {
+    if (kept.length === 0) return [learnId]
+    return kept
+  }
+  const next = [...kept, learnId]
+  return next.length > need ? next.slice(next.length - need) : next
+}
+
+/** Extra weapon to fuse at start (never the starter). */
 export function pickDuoLearn(starter: StarterId, rng: () => number): UpgradeId {
   const pool = duoLearnPool(starter)
   return pool[Math.floor(rng() * pool.length)] ?? 'learn_orb'
+}
+
+/** 开局融进主手的那张融合卡。 */
+export function duoFuseUpgradeId(starter: StarterId, learnId: UpgradeId): FuseUpgradeId {
+  const off = starterForLearn(ensureDuoLearn(starter, learnId)) ?? 'spirit_orb'
+  return fuseIdForOffhand(off)
 }
 
 /** Mods baked into loadout each run (permanent shop + this-run blessing + contracts). */
 export type MetaLoadoutMods = {
   extraHp: number
   extraLuck: number
-  /** 叠在 Kit 移速上；每层商店 +15%。 */
+  /** 叠在 Kit 移速上；每层商店 +10%。 */
   moveSpeedMul: number
-  /** 叠在热度衰减上；每层 ×0.75。 */
+  /** 叠在热度衰减上。 */
   heatDecayMul: number
-  /** 叠在 Kit 受击半径上；每层 −12%。 */
+  /** 叠在 Kit 受击半径上；每层 −10%。 */
   radiusMul: number
+  /** 商店：全场吸入金币 / 经验 / 遗物。 */
+  autoPickup: boolean
+  damageAdd: number
+  hasteAdd: number
+  armorDr: number
+  dodgeChance: number
+  critChance: number
+  xpMulAdd: number
+  magnetAdd: number
+  castReachAdd: number
+  castAreaAdd: number
+  hpRegen: number
   glass: boolean
   feverGainMul: number
   contracts: ContractId[]
@@ -131,42 +204,72 @@ export type MetaLoadoutMods = {
   muteFever: boolean
   /** 契约「素打」：拍点不加成、不画公路。 */
   muteBeat: boolean
+  /** 契约「盲抽」：三选随机，不能挑。 */
+  wildPick: boolean
   glassworld: boolean
 }
 
-const SPEED_PER_STACK = 0.1
-const HEAT_DECAY_PER_STACK = 0.82
-const RADIUS_SHRINK_PER_STACK = 0.1
-const HP_PER_STACK = 1
-const LUCK_PER_STACK = 1
+const S = SHOP_STACKS
+
+export type ShopRunStacks = {
+  startHp: number
+  startLuck: number
+  startSpeed?: number
+  startHeat?: number
+  startRadius?: number
+  autoPickup?: boolean
+  startDamage?: number
+  startHaste?: number
+  startArmor?: number
+  startDodge?: number
+  startCrit?: number
+  startGrowth?: number
+  startMagnet?: number
+  startReach?: number
+  startArea?: number
+  startRegen?: number
+}
+
+function n(v: number | undefined): number {
+  return Math.max(0, v ?? 0)
+}
 
 export function metaLoadoutMods(
-  startHp: number,
-  startLuck: number,
+  shop: ShopRunStacks,
   blessing: BlessingId | null,
   contracts: readonly ContractId[] = [],
-  startSpeed = 0,
-  startHeat = 0,
-  startRadius = 0,
+  opts?: { forceMuteBeat?: boolean },
 ): MetaLoadoutMods {
   const ids = [...contracts]
-  const speed = Math.max(0, startSpeed)
-  const heat = Math.max(0, startHeat)
-  const radius = Math.max(0, startRadius)
+  const speed = n(shop.startSpeed)
+  const heat = n(shop.startHeat)
+  const radius = n(shop.startRadius)
   return {
-    extraHp: Math.max(0, startHp) * HP_PER_STACK,
-    extraLuck: Math.max(0, startLuck) * LUCK_PER_STACK,
-    moveSpeedMul: 1 + SPEED_PER_STACK * speed,
-    heatDecayMul: heat > 0 ? HEAT_DECAY_PER_STACK ** heat : 1,
-    radiusMul: Math.max(0.55, 1 - RADIUS_SHRINK_PER_STACK * radius),
+    extraHp: n(shop.startHp) * S.hpPerStack,
+    extraLuck: n(shop.startLuck) * S.luckPerStack,
+    moveSpeedMul: 1 + S.speedPerStack * speed,
+    heatDecayMul: heat > 0 ? S.heatDecayPerStack ** heat : 1,
+    radiusMul: Math.max(S.radiusFloor, 1 - S.radiusShrinkPerStack * radius),
+    autoPickup: !!shop.autoPickup,
+    damageAdd: n(shop.startDamage) * S.damagePerStack,
+    hasteAdd: n(shop.startHaste) * S.hastePerStack,
+    armorDr: n(shop.startArmor) * S.armorPerStack,
+    dodgeChance: n(shop.startDodge) * S.dodgePerStack,
+    critChance: n(shop.startCrit) * S.critPerStack,
+    xpMulAdd: n(shop.startGrowth) * S.growthPerStack,
+    magnetAdd: n(shop.startMagnet) * S.magnetPerStack,
+    castReachAdd: n(shop.startReach) * S.reachPerStack,
+    castAreaAdd: n(shop.startArea) * S.areaPerStack,
+    hpRegen: n(shop.startRegen) * S.regenPerStack,
     glass: blessing === 'glass',
-    feverGainMul: blessing === 'fever' ? 1.22 : 1,
+    feverGainMul: blessing === 'fever' ? BLESSING_COMBAT.feverGainMul : 1,
     contracts: ids,
-    hordeCapMul: ids.includes('horde') ? 1.35 : 1,
-    hordeRateMul: ids.includes('horde') ? 0.72 : 1,
-    ironHpMul: ids.includes('iron') ? 1.28 : 1,
+    hordeCapMul: ids.includes('horde') ? CONTRACT_COMBAT.hordeCapMul : 1,
+    hordeRateMul: ids.includes('horde') ? CONTRACT_COMBAT.hordeRateMul : 1,
+    ironHpMul: ids.includes('iron') ? CONTRACT_COMBAT.ironHpMul : 1,
     muteFever: ids.includes('mute'),
-    muteBeat: ids.includes('still'),
+    muteBeat: ids.includes('still') || !!opts?.forceMuteBeat,
+    wildPick: ids.includes('wild'),
     glassworld: ids.includes('glassworld'),
   }
 }

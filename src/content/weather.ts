@@ -7,8 +7,8 @@ export type WeatherId =
   | 'dust'
   | 'magnet'
 
-/** 六标签：金只挂环刃。 */
-export type DmgTag = 'wind' | 'fire' | 'ice' | 'thunder' | 'earth' | 'metal'
+/** 五标签，跟五门走。 */
+export type DmgTag = 'wind' | 'fire' | 'ice' | 'thunder' | 'earth'
 
 export type TerrainKind = 'mud' | 'ice' | 'wind' | 'flame' | 'tide'
 
@@ -37,8 +37,8 @@ export const WEATHERS: WeatherDef[] = [
   {
     id: 'heat',
     name: '热浪',
-    blurb: '移速略慢 · 热度掉得慢 · 火+ 冰− 金−',
-    tagMul: { fire: 1.25, ice: 0.8, metal: 0.8 },
+    blurb: '移速略慢 · 热度掉得慢 · 火+ 冰−',
+    tagMul: { fire: 1.25, ice: 0.8 },
     moveMul: 0.88,
     heatDecayMul: 0.48,
     terrains: [{ kind: 'flame', count: 1 }],
@@ -82,8 +82,8 @@ export const WEATHERS: WeatherDef[] = [
   {
     id: 'magnet',
     name: '磁暴',
-    blurb: '风带 1 块 · 金+ 雷−',
-    tagMul: { metal: 1.25, thunder: 0.8 },
+    blurb: '风带 1 块 · 雷−',
+    tagMul: { thunder: 0.8 },
     moveMul: 1,
     heatDecayMul: 1,
     terrains: [{ kind: 'wind', count: 1 }],

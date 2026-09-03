@@ -1,1 +1,1 @@
-export { createSkyrimFemaleFigure, SKYRIM_FEMALE_DEFAULT } from './adapter'
+export { createSkyrimFemaleFigure, SKYRIM_FEMALE_DEFAULT, skyrimPackDefault } from './adapter'

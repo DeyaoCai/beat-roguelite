@@ -14,14 +14,14 @@ export function hitEffectForKind(kind: EnemyKind, source: 'bullet' | 'contact'):
   switch (kind) {
     case 'spitter':
       return source === 'bullet'
-        ? { poisonT: 3.2, poisonDps: 0.55 }
-        : { poisonT: 2.2, poisonDps: 0.45 }
+        ? { poisonT: 2.6, poisonDps: 0.35 }
+        : { poisonT: 1.8, poisonDps: 0.28 }
     case 'frost':
-      return { slowT: 2.4, slowMul: 0.48 }
+      return { slowT: 1.8, slowMul: 0.62 }
     case 'leech':
       return source === 'contact'
-        ? { bleedT: 3.6, bleedDps: 0.7 }
-        : { bleedT: 2.0, bleedDps: 0.45 }
+        ? { bleedT: 2.4, bleedDps: 0.4 }
+        : { bleedT: 1.6, bleedDps: 0.28 }
     case 'elite':
       return source === 'bullet'
         ? { slowT: 1.2, slowMul: 0.62 }

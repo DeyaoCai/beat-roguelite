@@ -6,14 +6,15 @@ import { drawDamageFloaters } from './damageFloaters'
 import { drawOffscreenTrackers } from './offscreenTrack'
 import { drawPlayPortraitChrome, playCamLayout } from './playPortrait'
 import { createHighway3D } from './highway3d'
-import { createCombatFx } from './combatFx'
-import { createHeroFigure } from '../../figures'
-import type { Gait } from '../../figures'
+import { createCombatFx, starterAuraHex } from './combatFx'
+import { createWeatherFx } from './weatherFx'
+import { createHeroFigure, SKYRIM_FEMALE_ID, type Gait } from '../../figures'
 import {
   createEnemyModelSlot,
   resolveEnemyVisualKind,
   setEnemyModelFlash,
   setEnemyModelKind,
+  syncEnemyFx,
   type EnemyModelSlot,
 } from './enemyModels'
 import {
@@ -73,7 +74,7 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
   })
   renderer.setClearColor(0x1a120c, 1)
   renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  renderer.shadowMap.type = THREE.PCFShadowMap
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.15
   renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -84,6 +85,7 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
 
   const scene = new THREE.Scene()
   const combatFx = createCombatFx(scene)
+  const weatherFx = createWeatherFx(scene)
   scene.background = new THREE.Color(0x1a120c)
 
   const playCam = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.1, 120)
@@ -110,6 +112,7 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
   let previewT = performance.now()
   const previewCam = new THREE.PerspectiveCamera(PREVIEW_FOV, 1, 0.05, 40)
   const faceCam = new THREE.PerspectiveCamera(PREVIEW_FOV, 1, 0.05, 40)
+  const radioCam = new THREE.PerspectiveCamera(PREVIEW_FOV, 1, 0.05, 40)
   const bustCam = new THREE.PerspectiveCamera(PREVIEW_FOV, 1, 0.05, 40)
   const fullCam = new THREE.PerspectiveCamera(PREVIEW_FOV, 1, 0.05, 40)
   const previewLook = new THREE.Vector3(0, AVATAR_HEIGHT * chestRatio, 0)
@@ -129,7 +132,7 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
   const dir = new THREE.DirectionalLight(0xffc878, PLAY_DIR)
   dir.position.set(12, 28, 8)
   dir.castShadow = true
-  dir.shadow.mapSize.set(2048, 2048)
+  dir.shadow.mapSize.set(1024, 1024)
   dir.shadow.bias = -0.00025
   dir.shadow.normalBias = 0.035
   // Default shadow cam is tiny (±5); expand + follow player each frame.
@@ -326,6 +329,7 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
   previewLookAxes.visible = false
   playerScale.add(previewLookAxes)
   let previewFov = PREVIEW_FOV
+  let allowCamPersist = true
 
   const previewTune = document.createElement('div')
   previewTune.style.cssText = `
@@ -454,6 +458,7 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
   })
 
   const persistCam = () => {
+    if (!allowCamPersist) return
     saveWardrobePersistSoon({
       shot,
       yaw: previewOrbit.yaw,
@@ -499,18 +504,31 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
   if (typeof savedCam?.fov === 'number') previewFov = savedCam.fov
 
   let playerUsesModel = false
-  const created = createHeroFigure({
+  let created = createHeroFigure({
     id: opts.figureId,
     getShot: () => shot,
     onShot: applyShot,
   })
-  const figure = created.figure
-  const wardrobe = created.wardrobe
+  let figure = created.figure
+  let wardrobe = created.wardrobe
   playerScale.add(figure.root)
   /** Look hydrate may finish mid-fight; force combat clip rebind. */
   let refreshCombatAnim = false
   let combatGait: Gait | null = null
   let lastCastSeq = 0
+  let heroGen = 0
+  const bindHeroReady = (gen: number) => {
+    void figure.ready
+      .then(() => {
+        if (gen !== heroGen) return
+        playerPlaceholder.visible = false
+        playerUsesModel = true
+      })
+      .catch((err) => {
+        if (gen !== heroGen) return
+        console.warn('[player model] load failed, keeping placeholder', err)
+      })
+  }
   if (wardrobe) {
     void wardrobe
       .hydrate({ pose: true })
@@ -519,14 +537,41 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
         refreshCombatAnim = true
       })
   }
-  void figure.ready
-    .then(() => {
-      playerPlaceholder.visible = false
-      playerUsesModel = true
-    })
-    .catch((err) => {
-      console.warn('[player model] load failed, keeping placeholder', err)
-    })
+  bindHeroReady(heroGen)
+
+  const radioScene = new THREE.Scene()
+  radioScene.background = new THREE.Color(0x160e0a)
+  radioScene.add(new THREE.HemisphereLight(0xfff1e4, 0x3a2418, 1.05))
+  const radioKey = new THREE.PointLight(0xfff1e4, 0.95, 4.2, 1.8)
+  radioKey.position.set(0.4, 1.5, 0.75)
+  const radioFill = new THREE.PointLight(0xe8c4a0, 0.32, 3.6, 1.8)
+  radioFill.position.set(-0.5, 1.2, 0.45)
+  const radioRim = new THREE.PointLight(0xc47848, 0.45, 3.8, 1.8)
+  radioRim.position.set(-0.2, 1.55, -0.65)
+  radioScene.add(radioKey, radioFill, radioRim)
+  const radioFigure = createHeroFigure({ id: SKYRIM_FEMALE_ID, variant: 'bust' }).figure
+  radioScene.add(radioFigure.root)
+  void radioFigure.ready
+    .then(() => radioFigure.playGait('idle'))
+    .catch((err) => console.warn('[radio] Sofia load failed', err))
+  let radioOnStage = false
+  const setRadioOnStage = (on: boolean) => {
+    if (on === radioOnStage) return
+    radioOnStage = on
+    if (on) {
+      radioScene.remove(radioFigure.root)
+      scene.add(radioFigure.root)
+      radioFigure.root.position.set(0, 0, 0)
+      radioFigure.root.rotation.set(0, 0, 0)
+      radioFigure.root.scale.setScalar(1)
+      radioFigure.playGait('idle')
+    } else {
+      scene.remove(radioFigure.root)
+      radioScene.add(radioFigure.root)
+      radioFigure.root.position.set(0, 0, 0)
+      radioFigure.root.rotation.set(0, 0, 0)
+    }
+  }
 
   const enemyMatFlash = new THREE.MeshStandardMaterial({
     color: 0xfff1f2,
@@ -539,12 +584,6 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
     emissive: 0x38bdf8,
     emissiveIntensity: 0.7,
     roughness: 0.3,
-  })
-  const enemyMatBleed = new THREE.MeshStandardMaterial({
-    color: 0xfecdd3,
-    emissive: 0xbe123c,
-    emissiveIntensity: 0.65,
-    roughness: 0.35,
   })
   const enemyMatAmp = new THREE.MeshStandardMaterial({
     color: 0xfef9c3,
@@ -564,6 +603,15 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
     emissiveIntensity: 0.45,
     roughness: 0.5,
   })
+  const enemyMatSlow = new THREE.MeshStandardMaterial({
+    color: 0xbae6fd,
+    emissive: 0x0284c7,
+    emissiveIntensity: 0.55,
+    roughness: 0.35,
+  })
+  const combatFxRoot = scene.getObjectByName('combatFx')
+  const weatherFxRoot = scene.getObjectByName('weatherFx')
+
   const enemyPool: EnemyModelSlot[] = []
   const ensureEnemyPool = (need: number) => {
     while (enemyPool.length < need) {
@@ -572,6 +620,9 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
       enemyPool.push(slot)
     }
   }
+  const codexFoe = createEnemyModelSlot()
+  scene.add(codexFoe.root)
+  codexFoe.root.visible = false
 
   const pickupPool: PickupModelSlot[] = []
   const ensurePickupPool = (need: number) => {
@@ -616,12 +667,16 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
       metalness: 0,
     })
   const terrainMats: Record<string, THREE.MeshStandardMaterial> = {
-    mud: mkTerrainMat(0x6b4f32, 0.52),
-    ice: mkTerrainMat(0xa5f3fc, 0.42),
-    wind: mkTerrainMat(0xe0f2fe, 0.32),
-    flame: mkTerrainMat(0xfb923c, 0.48),
-    tide: mkTerrainMat(0x38bdf8, 0.4),
+    mud: mkTerrainMat(0x6b4f32, 0.58),
+    ice: mkTerrainMat(0xa5f3fc, 0.48),
+    wind: mkTerrainMat(0xe0f2fe, 0.38),
+    flame: mkTerrainMat(0xfb923c, 0.55),
+    tide: mkTerrainMat(0x38bdf8, 0.46),
   }
+  terrainMats.flame!.emissive.setHex(0xea580c)
+  terrainMats.ice!.emissive.setHex(0x22d3ee)
+  terrainMats.tide!.emissive.setHex(0x0284c7)
+  terrainMats.wind!.emissive.setHex(0x7dd3fc)
   const terrainPool: PoolMesh[] = []
   const ensureTerrainPool = (need: number) => {
     while (terrainPool.length < need) {
@@ -656,7 +711,7 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
   ) => {
     while (pool.length < need) {
       const m = new THREE.Mesh(geo, mat)
-      m.castShadow = true
+      m.castShadow = false
       m.visible = false
       scene.add(m)
       pool.push(m)
@@ -746,7 +801,12 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
     return half / Math.tan((fovDeg * Math.PI) / 360)
   }
 
-  const compositionOffsetX = (cssW: number, mode: 'closet' | 'prep') => {
+  const compositionOffsetX = (cssW: number, mode: 'closet' | 'prep' | 'codex') => {
+    if (mode === 'codex') {
+      const leftSafe = Math.min(390, cssW * 0.36)
+      const wellW = Math.max(240, cssW - leftSafe - 36)
+      return cssW / 2 - (leftSafe + wellW / 2)
+    }
     if (mode === 'prep') {
       const leftSafe = Math.min(360, cssW * 0.4)
       const wellW = Math.max(180, cssW - leftSafe - 48)
@@ -846,11 +906,81 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
     beautyRim.color.setHex(0xc47848)
   }
 
-  const fitPreviewCamera = (cssW: number, cssH: number, mode: 'closet' | 'prep') => {
-      const height = figure.getFrame().height
-    const chestY = height * chestRatio
+  const applyWeatherMood = (id: string) => {
+    if (id === 'clear') return
+    if (id === 'heat') {
+      hemi.color.setHex(0xffc090)
+      hemi.groundColor.setHex(0x5a2410)
+      dir.color.setHex(0xff9a4a)
+      dir.intensity = PLAY_DIR * 1.08
+      rim.color.setHex(0xea580c)
+      scene.fog = new THREE.FogExp2(0x3a1608, 0.012)
+      scene.background = new THREE.Color(0x2a1208)
+      return
+    }
+    if (id === 'rain') {
+      hemi.color.setHex(0xb8d4e8)
+      hemi.groundColor.setHex(0x1e293b)
+      dir.color.setHex(0xc7d2fe)
+      dir.intensity = PLAY_DIR * 0.78
+      rim.color.setHex(0x38bdf8)
+      scene.fog = new THREE.FogExp2(0x0f172a, 0.014)
+      scene.background = new THREE.Color(0x121820)
+      return
+    }
+    if (id === 'gale') {
+      hemi.color.setHex(0xe0f2fe)
+      dir.color.setHex(0xf0f9ff)
+      rim.color.setHex(0x7dd3fc)
+      rim.intensity = 0.55
+      scene.fog = new THREE.FogExp2(0x1e293b, 0.008)
+      scene.background = new THREE.Color(0x1a2228)
+      return
+    }
+    if (id === 'frost') {
+      hemi.color.setHex(0xbae6fd)
+      hemi.groundColor.setHex(0x1e3a4c)
+      dir.color.setHex(0xe0f2fe)
+      dir.intensity = PLAY_DIR * 0.9
+      rim.color.setHex(0x67e8f9)
+      scene.fog = new THREE.FogExp2(0x0c1922, 0.013)
+      scene.background = new THREE.Color(0x101820)
+      return
+    }
+    if (id === 'dust') {
+      hemi.color.setHex(0xe8c478)
+      hemi.groundColor.setHex(0x4a3218)
+      dir.color.setHex(0xeab308)
+      dir.intensity = PLAY_DIR * 0.85
+      rim.color.setHex(0xa16207)
+      scene.fog = new THREE.FogExp2(0x3a2a12, 0.016)
+      scene.background = new THREE.Color(0x241808)
+      return
+    }
+    if (id === 'magnet') {
+      hemi.color.setHex(0xddd6fe)
+      hemi.groundColor.setHex(0x2e1064)
+      dir.color.setHex(0xc4b5fd)
+      rim.color.setHex(0xa78bfa)
+      rim.intensity = 0.7
+      scene.fog = new THREE.FogExp2(0x1e1b4b, 0.012)
+      scene.background = new THREE.Color(0x14102a)
+    }
+  }
+
+  const fitPreviewCamera = (
+    cssW: number,
+    cssH: number,
+    mode: 'closet' | 'prep' | 'codex',
+    heightArg?: number,
+    lookRatioArg?: number,
+    fillArg?: number,
+  ) => {
+    const height = heightArg ?? figure.getFrame().height
+    const chestY = height * (lookRatioArg ?? chestRatio)
     previewLook.set(0, chestY, 0)
-    const dist = framingDist(height, previewFov, frameFill) * previewOrbit.zoom
+    const fill = fillArg ?? frameFill
+    const dist = framingDist(height, previewFov, fill) * previewOrbit.zoom
     const cp = Math.cos(previewOrbit.pitch)
     previewCam.aspect = cssW / cssH
     previewCam.fov = previewFov
@@ -865,6 +995,107 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
     previewCam.setViewOffset(cssW, cssH, compositionOffsetX(cssW, mode), 0, cssW, cssH)
     previewCam.updateProjectionMatrix()
     return dist
+  }
+
+  /** Genshin/WuWa roster + MH hunter notes: 3/4 全身、髋部看点、轻俯、慢转台。 */
+  const CODEX_YAW0 = 0.44
+  const CODEX_PITCH = 0.08
+  const CODEX_PITCH_BOSS = 0.03
+  const CODEX_FOV = 28
+  const CODEX_FILL = 0.76
+  const CODEX_FILL_BOSS = 0.7
+  const CODEX_LOOK = 0.46
+  const CODEX_SPIN = 0.36
+  const CODEX_BOSS = new Set(['warden', 'caller', 'hex', 'choir', 'tyrant'])
+  const _codexBox = new THREE.Box3()
+  const _codexSize = new THREE.Vector3()
+  let hubOrbitHold: { yaw: number; pitch: number; zoom: number; fov: number } | null = null
+  let lastCodexId = ''
+
+  const restoreHubOrbit = () => {
+    if (!hubOrbitHold) return
+    previewOrbit.yaw = hubOrbitHold.yaw
+    previewOrbit.pitch = hubOrbitHold.pitch
+    previewOrbit.zoom = hubOrbitHold.zoom
+    previewFov = hubOrbitHold.fov
+    hubOrbitHold = null
+    lastCodexId = ''
+  }
+
+  const applyCodexStage = (snap: FrameSnapshot, dt: number, cssW: number, cssH: number) => {
+    if (!hubOrbitHold) {
+      hubOrbitHold = {
+        yaw: previewOrbit.yaw,
+        pitch: previewOrbit.pitch,
+        zoom: previewOrbit.zoom,
+        fov: previewFov,
+      }
+    }
+    const idKey = `${snap.codexSubject}:${snap.codexFoeKind ?? snap.codexIndex}`
+    if (idKey !== lastCodexId) {
+      lastCodexId = idKey
+      previewOrbit.yaw = CODEX_YAW0
+      previewIdle = 0
+      zoomUser = false
+    }
+    const boss = !!snap.codexFoeKind && CODEX_BOSS.has(snap.codexFoeKind)
+    previewOrbit.pitch = boss ? CODEX_PITCH_BOSS : CODEX_PITCH
+    if (!zoomUser) previewOrbit.zoom = 1
+    previewFov = CODEX_FOV
+    if (!previewOrbit.dragging && previewIdle > 0.4) previewOrbit.yaw += dt * CODEX_SPIN
+
+    const sub = snap.codexSubject
+    setRadioOnStage(sub === 'radio')
+    figure.root.visible = sub === 'hero'
+    playerPlaceholder.visible = sub === 'hero' && !playerUsesModel
+    playerRoot.visible = sub === 'hero'
+
+    if (sub === 'foe' && snap.codexFoeKind) {
+      const raw = snap.codexFoeKind
+      const kind = CODEX_BOSS.has(raw)
+        ? resolveEnemyVisualKind('boss', raw)
+        : resolveEnemyVisualKind(raw)
+      setEnemyModelKind(codexFoe, kind)
+      codexFoe.root.visible = true
+      codexFoe.root.position.set(0, 0, 0)
+      codexFoe.root.rotation.set(0, 0, 0)
+      syncEnemyFx(
+        codexFoe,
+        {
+          boss,
+          bossId: boss ? raw : undefined,
+          slowed: false,
+          frozen: false,
+          amped: false,
+          broken: false,
+          weak: false,
+          elem: null,
+          stacks: 0,
+        },
+        performance.now() * 0.001,
+      )
+      codexFoe.root.updateMatrixWorld(true)
+    } else {
+      codexFoe.root.visible = false
+    }
+
+    let height = figure.getFrame().height || AVATAR_HEIGHT
+    let lookRatio = CODEX_LOOK
+    const fill = boss ? CODEX_FILL_BOSS : CODEX_FILL
+    if (sub === 'radio') {
+      height = radioFigure.getFrame().height || AVATAR_HEIGHT
+    } else if (sub === 'foe' && codexFoe.kind) {
+      const body = codexFoe.variants[codexFoe.kind]
+      if (body) {
+        _codexBox.setFromObject(body)
+        _codexBox.getSize(_codexSize)
+        height = Math.max(0.45, _codexSize.y)
+        const lookY = _codexBox.min.y + height * CODEX_LOOK
+        lookRatio = lookY / height
+      }
+    }
+
+    fitPreviewCamera(cssW, cssH, 'codex', height, lookRatio, fill)
   }
 
   const FACE_YAW = 0.22
@@ -920,12 +1151,35 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
     cam: THREE.PerspectiveCamera,
     well: { x: number; y: number; w: number; h: number },
     cssH: number,
+    target: THREE.Scene = scene,
   ) => {
     if (well.w < 48 || well.h < 48) return
     renderer.setViewport(well.x, cssH - well.y - well.h, well.w, well.h)
     renderer.setScissor(well.x, cssH - well.y - well.h, well.w, well.h)
     renderer.clear(true, true, true)
-    renderer.render(scene, cam)
+    renderer.render(target, cam)
+  }
+
+  const frameRadioCam = (well: { w: number; h: number }) => {
+    const shot = PREVIEW_SHOTS.face
+    const bodyH = radioFigure.getFrame().height || AVATAR_HEIGHT
+    const lookY = bodyH * PLAY_FACE_LOOK
+    const frameH = bodyH * PLAY_FACE_SUBJECT
+    const dist = framingDist(frameH, PLAY_FACE_FOV, shot.fill) * shot.zoom * PLAY_FACE_DIST
+    const pitch = shot.pitch
+    const cp = Math.cos(pitch)
+    radioCam.aspect = Math.max(0.35, well.w / well.h)
+    radioCam.fov = PLAY_FACE_FOV
+    radioCam.near = 0.08
+    radioCam.far = Math.max(40, dist * 5)
+    radioCam.position.set(
+      Math.sin(FACE_YAW) * cp * dist,
+      lookY + Math.sin(pitch) * dist,
+      Math.cos(FACE_YAW) * cp * dist,
+    )
+    radioCam.lookAt(0, lookY, 0)
+    radioCam.clearViewOffset()
+    radioCam.updateProjectionMatrix()
   }
 
   /** Soften / lift beauty for portrait wells (still same lights). */
@@ -938,6 +1192,17 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
 
   /** Portrait wells — same arena scene, telephoto cams locked to the protagonist. */
   const renderPlayPortrait = (snap: FrameSnapshot, cssW: number, cssH: number) => {
+    const hidden: THREE.Object3D[] = [arenaGroup]
+    if (combatFxRoot) hidden.push(combatFxRoot)
+    if (weatherFxRoot) hidden.push(weatherFxRoot)
+    for (const slot of enemyPool) hidden.push(slot.root)
+    for (const slot of obstaclePool) hidden.push(slot.root)
+    for (const slot of pickupPool) hidden.push(slot.root)
+    for (const m of bulletPool) hidden.push(m)
+    for (const m of terrainPool) hidden.push(m)
+    const prev = hidden.map((o) => o.visible)
+    for (const o of hidden) o.visible = false
+
     const lay = playCamLayout(cssW, cssH, snap)
     const bodyH = (figure.getFrame().height || AVATAR_HEIGHT) * playerScale.scale.x
     framePlayLocalCam(faceCam, PREVIEW_SHOTS.face, FACE_YAW, lay.face.w / lay.face.h, PLAY_FACE_FOV, {
@@ -960,12 +1225,16 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
     renderer.autoClear = false
     renderer.setScissorTest(true)
     blitWell(faceCam, lay.face, cssH)
+    frameRadioCam(lay.radio)
+    blitWell(radioCam, lay.radio, cssH, radioScene)
     if (lay.featured === 'bust') blitWell(bustCam, lay.bust, cssH)
     else blitWell(fullCam, lay.full, cssH)
     renderer.setScissorTest(false)
     renderer.setViewport(0, 0, cssW, cssH)
     renderer.autoClear = prevAuto
     setBeautyPortrait(false)
+
+    for (let i = 0; i < hidden.length; i++) hidden[i]!.visible = prev[i]!
   }
 
   let previewInput = true
@@ -1023,7 +1292,8 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
       snap.scene === 'prep' ||
       snap.scene === 'closet' ||
       snap.scene === 'options' ||
-      snap.scene === 'shop'
+      snap.scene === 'shop' ||
+      snap.scene === 'codex'
     const onCloset = snap.scene === 'closet'
     const hubTheme = onCloset ? 'studio' : snap.hubThemeId
     previewInput = onStudio
@@ -1085,26 +1355,41 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
       mid: snap.audioMid,
       energy: snap.audioEnergy,
     })
+    radioFigure.tick(dt)
 
     if (onStudio) {
+      const onCodex = snap.scene === 'codex'
+      allowCamPersist = !onCodex
       previewIdle += dt
       const ease = 1 - Math.exp(-dt * 7)
-      chestRatio += (chestGoal - chestRatio) * ease
-      frameFill += (fillGoal - frameFill) * ease
-      if (!zoomUser) previewOrbit.zoom += (zoomGoal - previewOrbit.zoom) * ease
-      if (!previewOrbit.dragging) previewOrbit.pitch += (pitchGoal - previewOrbit.pitch) * ease
+      if (!onCodex) {
+        chestRatio += (chestGoal - chestRatio) * ease
+        frameFill += (fillGoal - frameFill) * ease
+        if (!zoomUser) previewOrbit.zoom += (zoomGoal - previewOrbit.zoom) * ease
+        if (!previewOrbit.dragging) previewOrbit.pitch += (pitchGoal - previewOrbit.pitch) * ease
+      }
       applyTitleLights(hubTheme)
       hubStage.tick(now / 1000, dt)
       const frame = figure.getFrame()
       const chestY = frame.height * chestRatio
       previewLookAxes.position.set(0, chestY, 0)
       playerRoot.updateMatrixWorld(true)
-      const dist = fitPreviewCamera(cssW, cssH, onCloset ? 'closet' : 'prep')
+      if (onCodex) {
+        applyCodexStage(snap, dt, cssW, cssH)
+      } else {
+        restoreHubOrbit()
+        setRadioOnStage(false)
+        codexFoe.root.visible = false
+        figure.root.visible = true
+        playerRoot.visible = true
+        playerPlaceholder.visible = !playerUsesModel
+        fitPreviewCamera(cssW, cssH, onCloset ? 'closet' : 'prep')
+      }
       if (previewDebug) {
         syncTuneFields()
         tuneDump.textContent = [
           `景别 ${shot}  身高 ${frame.height.toFixed(2)}m  宽 ${frame.width.toFixed(2)}`,
-          `胸口 ${chestY.toFixed(2)} (${chestRatio.toFixed(2)}·H)  距离 ${dist.toFixed(2)}  zoom ${previewOrbit.zoom.toFixed(2)}`,
+          `胸口 ${chestY.toFixed(2)} (${chestRatio.toFixed(2)}·H)  zoom ${previewOrbit.zoom.toFixed(2)}`,
           `偏航 ${previewOrbit.yaw.toFixed(2)}  俯仰 ${previewOrbit.pitch.toFixed(2)}  FOV ${previewFov.toFixed(1)}`,
         ].join('\n')
       }
@@ -1121,9 +1406,15 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
       for (const m of bulletPool) m.visible = false
       for (const m of terrainPool) m.visible = false
       combatFx.hide()
+      weatherFx.hide()
       renderer.render(scene, previewCam)
     } else if (showArena) {
+      restoreHubOrbit()
+      setRadioOnStage(false)
+      codexFoe.root.visible = false
+      figure.root.visible = true
       restorePlayLights()
+      applyWeatherMood(snap.weatherId)
       previewCam.clearViewOffset()
       const p = snap.player
       if (!playerUsesModel) {
@@ -1143,13 +1434,25 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
         playerMat.emissive.setHex(0x3a2414)
       }
       figure.setOutline(
-        p.hurtFlash > 0.15 ? 0xfb7185 : 0xfff1c2,
-        snap.feverActive ? 0.03 : 0.018,
+        p.hurtFlash > 0.15
+          ? 0xfb7185
+          : snap.feverActive
+            ? 0xfde047
+            : p.shieldOn
+              ? 0xfbbf24
+              : starterAuraHex(snap.starterId),
+        snap.feverActive ? 0.04 : p.dashing ? 0.036 : p.shieldOn ? 0.03 : 0.026,
       )
 
       const halfCam = snap.arenaHalf
       updateFollowCamera(p.x, p.z, halfCam, p.hurtFlash)
 
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.004)
+      terrainMats.flame!.emissiveIntensity = 0.28 + 0.4 * pulse
+      terrainMats.ice!.emissiveIntensity = 0.14 + 0.2 * pulse
+      terrainMats.tide!.emissiveIntensity = 0.12 + 0.18 * pulse
+      terrainMats.wind!.opacity = 0.3 + 0.16 * pulse
+      terrainMats.tide!.opacity = 0.38 + 0.14 * pulse
       ensureTerrainPool(snap.terrain.length)
       for (let i = 0; i < terrainPool.length; i++) {
         const mesh = terrainPool[i]!
@@ -1197,16 +1500,15 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
           ? enemyMatFlash
           : frozen
             ? enemyMatFreeze
-            : e.bleed
-              ? enemyMatBleed
-              : e.amped
+            : e.amped
                 ? enemyMatAmp
                 : e.broken
                   ? enemyMatBreak
                   : e.weak
                     ? enemyMatWeak
-                    : null
-        setEnemyModelFlash(slot, false, enemyMatFlash)
+                    : e.slowed
+                      ? enemyMatSlow
+                      : null
         setEnemyModelFlash(slot, !!statusMat, statusMat ?? enemyMatFlash)
         const punch = 1 + 0.4 * e.hurtFlash
         const s =
@@ -1216,6 +1518,21 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
         slot.root.position.set(e.x, 0, e.z)
         slot.root.scale.setScalar(s)
         slot.root.rotation.y = Math.atan2(snap.player.x - e.x, snap.player.z - e.z)
+        syncEnemyFx(
+          slot,
+          {
+            boss: e.kind === 'boss',
+            bossId: e.bossId,
+            slowed: !!e.slowed,
+            frozen,
+            amped: !!e.amped,
+            broken: !!e.broken,
+            weak: !!e.weak,
+            elem: e.elem ?? null,
+            stacks: e.stacks ?? 0,
+          },
+          now * 0.001,
+        )
       }
 
       ensurePickupPool(snap.pickups.length)
@@ -1253,6 +1570,7 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
       }
 
       combatFx.sync(snap, true)
+      weatherFx.sync(snap, true)
     } else {
       for (const slot of enemyPool) slot.root.visible = false
       for (const slot of obstaclePool) slot.root.visible = false
@@ -1260,6 +1578,7 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
       for (const m of bulletPool) m.visible = false
       for (const m of terrainPool) m.visible = false
       combatFx.hide()
+      weatherFx.hide()
       restorePlayLights()
       renderer.render(scene, playCam)
     }
@@ -1286,5 +1605,52 @@ export function createThreeOrthoRenderer(host: HTMLElement, opts: ThreeOrthoOpts
     }
   }
 
-  return { resize, draw, wardrobe, heroCaps: figure.capabilities }
+  return {
+    resize,
+    draw,
+    get wardrobe() {
+      return wardrobe
+    },
+    get heroCaps() {
+      return figure.capabilities
+    },
+    setFigure: async (id: string) => {
+      if (figure.id === id) return
+      heroGen += 1
+      const gen = heroGen
+      playerScale.remove(figure.root)
+      figure.root.traverse((n) => {
+        const mesh = n as THREE.Mesh
+        if (mesh.geometry) mesh.geometry.dispose()
+        const mat = mesh.material
+        if (!mat) return
+        const list = Array.isArray(mat) ? mat : [mat]
+        for (const m of list) m.dispose()
+      })
+      playerUsesModel = false
+      playerPlaceholder.visible = true
+      created = createHeroFigure({
+        id,
+        getShot: () => shot,
+        onShot: applyShot,
+      })
+      figure = created.figure
+      wardrobe = created.wardrobe
+      playerScale.add(figure.root)
+      if (wardrobe) {
+        void wardrobe
+          .hydrate({ pose: true })
+          .catch((err) => console.warn('[wardrobe] hydrate look failed', err))
+          .finally(() => {
+            if (gen === heroGen) refreshCombatAnim = true
+          })
+      }
+      bindHeroReady(gen)
+      try {
+        await figure.ready
+      } catch {
+        /* placeholder stays */
+      }
+    },
+  }
 }

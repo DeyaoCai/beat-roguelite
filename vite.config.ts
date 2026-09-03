@@ -51,7 +51,11 @@ function resourceMountPlugin() {
   }
 }
 
+/** GitHub Pages project site: `https://<user>.github.io/beat-roguelite/` → `/beat-roguelite/` */
+const base = process.env.VITE_BASE ?? '/'
+
 export default defineConfig({
+  base,
   plugins: [resourceMountPlugin()],
   server: {
     fs: { allow: [root, resourceRoot] },

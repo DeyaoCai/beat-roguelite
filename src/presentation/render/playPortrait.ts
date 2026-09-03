@@ -10,6 +10,8 @@ export type CamWell = {
 export type PlayCamLayout = {
   panel: CamWell
   face: CamWell
+  /** Sofia radio operator — right of the HP/XP/HEAT cluster. */
+  radio: CamWell
   bars: { x: number; y: number; w: number }
   bust: CamWell
   full: CamWell
@@ -25,15 +27,18 @@ export function playCamLayout(w: number, h: number, snap: FrameSnapshot): PlayCa
     snap.player.bleedT > 0 ||
     snap.player.shieldOn
   const face = Math.round(Math.min(112, Math.max(88, Math.min(w, h) * 0.11)))
+  const gap = 10
   const barsW = Math.min(200, Math.max(152, w * 0.175))
   const barsH = 96 + (hasStatus ? 16 : 0)
   const inset = 10
   const panelH = Math.max(inset * 2 + face, inset + barsH + 6)
-  const panelW = inset + face + 10 + barsW + inset
+  const panelW = inset + face + gap + barsW + inset
   const panelX = pad
   const panelY = 14
   const faceX = panelX + inset
   const faceY = panelY + Math.round((panelH - face) / 2)
+  const barsX = faceX + face + gap
+  const radioX = panelX + panelW + gap
 
   // 半身 / 全身互斥：右下角同一机位窗
   const featured: 'bust' | 'full' = snap.feverActive ? 'full' : 'bust'
@@ -50,7 +55,8 @@ export function playCamLayout(w: number, h: number, snap: FrameSnapshot): PlayCa
   return {
     panel: { x: panelX, y: panelY, w: panelW, h: panelH },
     face: { x: faceX, y: faceY, w: face, h: face },
-    bars: { x: faceX + face + 10, y: panelY + inset, w: barsW },
+    radio: { x: radioX, y: faceY, w: face, h: face },
+    bars: { x: barsX, y: panelY + inset, w: barsW },
     full: featured === 'full' ? well : hidden,
     bust: featured === 'bust' ? well : hidden,
     featured,
@@ -69,6 +75,7 @@ export function drawPlayPortraitChrome(
   const fever = snap.feverActive
 
   drawWell(ctx, lay.face, '特写', 'face', hurt, fever)
+  drawWell(ctx, lay.radio, '通讯', 'idle', 0, false)
   if (fever) drawLightningFrame(ctx, lay.face)
   if (lay.featured === 'bust') {
     drawWell(ctx, lay.bust, '半身', 'live', hurt, fever)
