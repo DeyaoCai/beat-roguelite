@@ -254,6 +254,7 @@ export function emptySnapshot(scene: SceneKind): FrameSnapshot {
     rhythmEnabled: true,
     shopRows: [],
     fadeBlack: 0,
+    paused: false,
   }
 }
 
@@ -513,5 +514,6 @@ export function worldToSnapshot(
     rhythmEnabled: isRhythmEnabled(),
     shopRows: [],
     fadeBlack: 0,
+    paused: false,
   }
 }

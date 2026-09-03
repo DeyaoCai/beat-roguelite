@@ -227,6 +227,7 @@ export function createTunePanel(
   host: HTMLElement,
   opts: {
     onResume?: () => void
+    onAbandon?: () => void
     onMusicGain?: (v: number) => void
     getMusicGain?: () => number
     onSfxGain?: (v: number) => void
@@ -338,6 +339,13 @@ export function createTunePanel(
 
   const actions = document.createElement('div')
   actions.style.cssText = 'display:flex;gap:10px;margin-top:16px;justify-content:flex-end;'
+  const abandonBtn = document.createElement('button')
+  abandonBtn.textContent = '结束本局'
+  abandonBtn.style.cssText = `
+    background:transparent;color:#fda4af;border:1px solid rgba(251,113,133,0.45);border-radius:8px;
+    padding:8px 14px;font-weight:700;cursor:pointer;
+  `
+  abandonBtn.addEventListener('click', () => opts.onAbandon?.())
   const resumeBtn = document.createElement('button')
   resumeBtn.textContent = '继续游戏'
   resumeBtn.style.cssText = `
@@ -345,7 +353,7 @@ export function createTunePanel(
     padding:8px 14px;font-weight:700;cursor:pointer;
   `
   resumeBtn.addEventListener('click', () => opts.onResume?.())
-  actions.appendChild(resumeBtn)
+  actions.append(abandonBtn, resumeBtn)
   card.appendChild(actions)
 
   // stop key events from reaching game while typing/sliding

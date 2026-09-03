@@ -59,6 +59,7 @@ import {
   tickFade,
   tickPlayFrame,
   writePrep,
+  abandonRun,
   type SessionIO,
 } from './session'
 
@@ -252,17 +253,22 @@ export async function boot(app: HTMLElement, opts: BootOptions = {}): Promise<()
   const setPaused = (v: boolean) => {
     if (s.scene !== 'play' || !s.world) return
     s.paused = v
-    tune.setOpen(v)
+    if (import.meta.env.DEV) {
+      tune.setOpen(v)
+      if (v) tune.syncFromWorld(s.world)
+    }
     if (v) {
-      tune.syncFromWorld(s.world)
       void clock.pauseAudio()
     } else {
+      tune.setOpen(false)
       syncBackgroundAudio()
     }
   }
 
+  let io!: SessionIO
   const tune = createTunePanel(app, {
     onResume: () => setPaused(false),
+    onAbandon: () => abandonRun(s, io),
     onMusicGain: (g) => applyMusicGain(g),
     getMusicGain: () => clock.getMusicGain(),
     onSfxGain: (g) => applySfxGain(g),
@@ -314,6 +320,16 @@ export async function boot(app: HTMLElement, opts: BootOptions = {}): Promise<()
     if (e.key === 'Escape' && s.scene === 'play' && s.world) {
       e.preventDefault()
       setPaused(!s.paused)
+      return
+    }
+    if (
+      s.paused &&
+      s.scene === 'play' &&
+      s.world &&
+      (e.key === 'Enter' || e.key === ' ')
+    ) {
+      e.preventDefault()
+      abandonRun(s, io)
       return
     }
     if (s.paused) return
@@ -499,7 +515,7 @@ export async function boot(app: HTMLElement, opts: BootOptions = {}): Promise<()
     clock.stop()
   }
 
-  const io: SessionIO = {
+  io = {
     clock,
     keys: input.keys,
     persistPrep,

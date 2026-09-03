@@ -1,6 +1,6 @@
 import type { AudioClockPort } from '../shared/ports'
 import { ARENA_RULES } from '../../content/rules'
-import { applyEnemyDefeatedRewards, openOffer } from '../progression'
+import { applyEnemyDefeatedRewards, openOffer, vacuumPickups } from '../progression'
 import { isLastStandardWave } from './arena'
 import type { World } from './types'
 
@@ -39,6 +39,18 @@ export function tickWaveClear(w: World, dt: number, clock: AudioClockPort): void
       w.enemies = w.enemies.filter((e) => e.hp > 0)
       clock.beep('pickup_relic')
     }
+  }
+
+  // 曲终清场：未捡遗物会卡关，与杀 Boss 一样全场收一次。
+  if (
+    w.waveTime >= w.waveDuration &&
+    !w.enemies.some((e) => e.kind !== 'chest' && e.hp > 0) &&
+    w.lootGraceT <= 0 &&
+    !w.cleared &&
+    !w.dead &&
+    relicsOnGround(w)
+  ) {
+    vacuumPickups(w, clock)
   }
 
   if (

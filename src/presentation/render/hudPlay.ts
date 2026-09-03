@@ -65,6 +65,25 @@ export function drawPlayHud(
   drawBossBar(ctx, w, h, snap)
   drawLevelUp(ctx, w, h, snap)
   drawHint(ctx, w, h, snap.hint)
+  if (snap.paused) drawPauseOverlay(ctx, w, h)
+}
+
+function drawPauseOverlay(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  ctx.fillStyle = 'rgba(7, 10, 16, 0.62)'
+  ctx.fillRect(0, 0, w, h)
+  const cardW = Math.min(380, w * 0.74)
+  const cardH = 118
+  const cx = (w - cardW) / 2
+  const cy = (h - cardH) / 2
+  paintPanel(ctx, cx, cy, cardW, cardH)
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#f3ead8'
+  ctx.font = `700 24px ${FONT}`
+  ctx.fillText('已暂停', w / 2, cy + 44)
+  ctx.fillStyle = '#b8a894'
+  ctx.font = `14px ${FONT}`
+  ctx.fillText('Esc 继续 · Enter 结束本局', w / 2, cy + 76)
+  ctx.textAlign = 'left'
 }
 
 function drawHurtVignette(

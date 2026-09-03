@@ -312,6 +312,8 @@ export type FrameSnapshot = {
   }[]
   /** 0 = clear, 1 = full black (wave transition). */
   fadeBlack: number
+  /** 局内暂停叠层。 */
+  paused: boolean
 }
 
 export interface Renderer {

@@ -113,7 +113,7 @@ function playHint(s: SessionState): string {
     if (world.pickReason === 'chest') return '宝箱 · 遗物 · 小键盘 1/2/3'
     return '升级 · 小强化 · 小键盘 1/2/3'
   }
-  if (s.paused) return '已暂停 · Esc 继续'
+  if (s.paused) return '已暂停 · Esc 继续 · Enter 结束本局'
   if (world.loadout.muteBeat || !isRhythmEnabled()) {
     return world.loadout.muteFever
       ? 'WASD 走位 · Shift 闪避 · Fever 锁'
@@ -236,5 +236,6 @@ export function buildSnapshot(s: SessionState, io: SessionIO): FrameSnapshot {
     s.runKills,
   )
   base.fadeBlack = s.fadeBlack
+  base.paused = s.paused
   return base
 }

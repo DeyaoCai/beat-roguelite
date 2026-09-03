@@ -8,6 +8,7 @@ export {
 } from './types'
 export { navDir, pickIndexFromInput } from './nav'
 export { beginFadeToWave, beginFadeToResult, tickFade } from './fade'
+export { abandonRun } from './abandonRun'
 export { writePrep, hydratePrep, clampFusePicks, loadPrep } from './persist'
 export { handlePrepKey } from './prepInput'
 export { handleMenuKey } from './menuInput'
