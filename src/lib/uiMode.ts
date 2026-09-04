@@ -2,9 +2,33 @@
 
 export type UiMode = 'touch' | 'desk'
 
+export function isMiniProgramEnv(
+  search = typeof window !== 'undefined' ? window.location.search : '',
+  ua = typeof navigator !== 'undefined' ? navigator.userAgent : '',
+): boolean {
+  try {
+    const q = new URLSearchParams(search)
+    if (q.get('mp') === '1' || q.get('mp') === 'true') return true
+  } catch {
+    /* ignore */
+  }
+  if (/miniProgram/i.test(ua)) return true
+  try {
+    const w = window as Window & {
+      __wxjs_environment?: string
+      wx?: { miniProgram?: unknown }
+    }
+    if (w.__wxjs_environment === 'miniprogram') return true
+    if (w.wx?.miniProgram) return true
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
 export function resolveUiMode(
   search = typeof window !== 'undefined' ? window.location.search : '',
-  opts?: { coarse?: boolean; width?: number },
+  opts?: { coarse?: boolean; width?: number; ua?: string },
 ): UiMode {
   try {
     const q = new URLSearchParams(search)
@@ -14,6 +38,7 @@ export function resolveUiMode(
   } catch {
     /* ignore */
   }
+  if (isMiniProgramEnv(search, opts?.ua)) return 'touch'
   const coarse =
     opts?.coarse ??
     (typeof window !== 'undefined' &&

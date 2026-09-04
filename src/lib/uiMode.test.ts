@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveUiMode } from './uiMode'
+import { isMiniProgramEnv, resolveUiMode } from './uiMode'
 
 describe('resolveUiMode', () => {
   it('forces touch via query', () => {
@@ -15,5 +15,17 @@ describe('resolveUiMode', () => {
     expect(resolveUiMode('', { coarse: true, width: 1400 })).toBe('touch')
     expect(resolveUiMode('', { coarse: false, width: 430 })).toBe('touch')
     expect(resolveUiMode('', { coarse: false, width: 1280 })).toBe('desk')
+  })
+
+  it('forces touch inside mini-program / mp query', () => {
+    expect(resolveUiMode('?mp=1', { coarse: false, width: 1400 })).toBe('touch')
+    expect(isMiniProgramEnv('?mp=1')).toBe(true)
+    expect(
+      resolveUiMode('', {
+        coarse: false,
+        width: 1400,
+        ua: 'MicroMessenger miniProgram',
+      }),
+    ).toBe('touch')
   })
 })

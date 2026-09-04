@@ -74,6 +74,8 @@ pnpm deploy:pages        # 手动推 gh-pages（可选）
 
 访问：`https://deyaocai.github.io/beat-roguelite/`
 
+触控壳：手机 / 窄屏自动，或 `?ui=touch`。微信小程序壳见 [`mp-weixin/README.md`](mp-weixin/README.md)。
+
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `VITE_BASE` | `/beat-roguelite/` | 子路径；用户页根域改为 `/` |

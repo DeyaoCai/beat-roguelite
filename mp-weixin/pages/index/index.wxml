@@ -1,0 +1,6 @@
+<!-- 业务域名需在微信公众平台配置为 Pages 主机 -->
+<web-view wx:if="{{url}}" src="{{url}}" bindmessage="onMessage"></web-view>
+<view wx:else class="boot">
+  <text class="title">Beat Roguelite</text>
+  <text class="hint">正在打开游戏…</text>
+</view>

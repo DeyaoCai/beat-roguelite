@@ -140,11 +140,16 @@ export function createTouchPad(host: HTMLElement, keys: KeyState): TouchPad {
     onPause?.()
   })
 
+  let open = false
+
   return {
     root,
     setVisible: (v) => {
+      if (open === v) return
+      open = v
       root.style.display = v ? 'block' : 'none'
       root.setAttribute('aria-hidden', v ? 'false' : 'true')
+      // 仅在从显示→隐藏时清摇杆；每帧 setVisible(false) 会误清键盘 WASD
       if (!v) {
         stickId = null
         clearMove()
@@ -176,7 +181,11 @@ export function createTouchPad(host: HTMLElement, keys: KeyState): TouchPad {
       dash.btn.classList.toggle('is-cooling', dCd > 0.02)
     },
     dispose: () => {
-      clearMove()
+      if (open) {
+        stickId = null
+        clearMove()
+      }
+      open = false
       root.remove()
     },
   }

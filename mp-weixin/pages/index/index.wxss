@@ -1,0 +1,21 @@
+.boot {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: #140e0a;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f3ead8;
+}
+
+.hint {
+  font-size: 13px;
+  color: #b8a894;
+}
